@@ -1,0 +1,209 @@
+<div class="paypercut-payment">
+  <!-- Payment Methods Display -->
+  {% if payment_methods %}
+  <div class="payment-methods-display mb-3 p-3" style="background: #f9f9f9; border-radius: 5px;">
+    <h4 class="mb-2" style="font-size: 14px; color: #666;">
+      <i class="fas fa-lock"></i> {{ text_secure_payment }}
+    </h4>
+    <div class="payment-methods-list d-flex flex-wrap gap-2">
+      {% for method in payment_methods %}
+      <div class="payment-method-item d-flex align-items-center px-3 py-2" style="background: white; border: 1px solid #ddd; border-radius: 4px;">
+        <i class="fas {{ method.icon }} me-2" style="font-size: 18px; color: #333;"></i>
+        <span style="font-size: 13px; color: #555;">{{ method.name }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="mb-0 mt-2" style="font-size: 11px; color: #999;">
+      <i class="fas fa-shield-alt"></i> Your payment information is encrypted and secure
+    </p>
+  </div>
+  {% endif %}
+  
+  <!-- Error Message Container -->
+  <div id="payment-error-container" class="mb-3" style="display: none;">
+    <div class="alert alert-danger alert-dismissible fade show">
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      <i class="fas fa-exclamation-circle"></i> <span id="payment-error-message"></span>
+    </div>
+  </div>
+  
+  <!-- Embedded Checkout Container -->
+  {% if checkout_mode is defined and checkout_mode == 'embedded' %}
+  <div id="paypercut-embedded-checkout" class="mb-3">
+    <div id="paypercut-loading" class="text-center py-4">
+      <i class="fas fa-spinner fa-spin fa-2x"></i>
+      <p class="mt-2">{{ text_loading }}</p>
+    </div>
+  </div>
+  {% endif %}
+  
+  <!-- Confirm Button -->
+  <div class="text-end">
+    {% if checkout_mode is defined and checkout_mode == 'embedded' %}
+    <button type="button" id="button-confirm" class="btn btn-primary" style="display: none;">{{ button_confirm }}</button>
+    {% else %}
+    <button type="button" id="button-confirm" class="btn btn-primary">{{ button_confirm }}</button>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Paypercut Checkout JavaScript SDK -->
+<script src="https://cdn.jsdelivr.net/npm/@paypercut/checkout-js@1.0.12/dist/paypercut-checkout.iife.min.js"></script>
+
+<script type="text/javascript">
+var paymentProcessing = false;
+var paypercutCheckout = null;
+
+{% if checkout_mode is defined and checkout_mode == 'embedded' %}
+// Embedded mode - Initialize checkout via AJAX
+var embeddedOrderId = null;
+
+function initPaypercutCheckout(checkoutId, orderId) {
+    try {
+        embeddedOrderId = orderId;
+        document.getElementById('paypercut-loading').style.display = 'none';
+        
+        paypercutCheckout = window.PaypercutCheckout({
+            id: checkoutId,
+            containerId: '#paypercut-embedded-checkout',
+            wallet_options: {{ wallet_options|default([])|json_encode|raw }}
+        });
+
+        paypercutCheckout.on('success', function(result) {
+            console.log('Payment success result:', result);
+            window.location.href = 'index.php?route=extension/paypercut/payment/paypercut|callback&order_id=' + encodeURIComponent(orderId) + '&checkout_id=' + encodeURIComponent(checkoutId);
+        });
+
+        paypercutCheckout.on('error', function(error) {
+            document.getElementById('payment-error-message').textContent = error.message || 'Payment failed. Please try again.';
+            document.getElementById('payment-error-container').style.display = 'block';
+        });
+
+        paypercutCheckout.on('cancel', function() {
+            console.log('Payment cancelled by user');
+        });
+
+        paypercutCheckout.render();
+    } catch (error) {
+        console.error('Embedded checkout initialization error:', error);
+        document.getElementById('payment-error-message').textContent = 'Failed to initialize payment form. Please refresh the page and try again.';
+        document.getElementById('payment-error-container').style.display = 'block';
+        document.getElementById('paypercut-loading').style.display = 'none';
+    }
+}
+
+// Fetch checkout session via AJAX
+function fetchCheckoutSession() {
+    console.log('Fetching checkout session from:', '{{ init_embedded_url }}');
+    
+    fetch('{{ init_embedded_url }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        credentials: 'same-origin'
+    })
+    .then(response => {
+        console.log('Response status:', response.status);
+        if (!response.ok) {
+            throw new Error('HTTP error! status: ' + response.status);
+        }
+        return response.json();
+    })
+    .then(json => {
+        console.log('Checkout session response:', json);
+        if (json.error) {
+            document.getElementById('payment-error-message').textContent = json.error;
+            document.getElementById('payment-error-container').style.display = 'block';
+            document.getElementById('paypercut-loading').style.display = 'none';
+        } else if (json.checkout_id) {
+            initPaypercutCheckout(json.checkout_id, json.order_id);
+        } else {
+            document.getElementById('payment-error-message').textContent = 'Failed to initialize payment. Please try again.';
+            document.getElementById('payment-error-container').style.display = 'block';
+            document.getElementById('paypercut-loading').style.display = 'none';
+        }
+    })
+    .catch(error => {
+        console.error('Error fetching checkout session:', error);
+        document.getElementById('payment-error-message').textContent = 'Connection error: ' + error.message;
+        document.getElementById('payment-error-container').style.display = 'block';
+        document.getElementById('paypercut-loading').style.display = 'none';
+    });
+}
+
+// Wait for SDK to load, then fetch checkout session
+function waitForSDKAndInit() {
+    console.log('Checking for PaypercutCheckout SDK...');
+    
+    if (typeof window.PaypercutCheckout !== 'undefined') {
+        console.log('PaypercutCheckout SDK already loaded');
+        fetchCheckoutSession();
+    } else {
+        console.log('Waiting for PaypercutCheckout SDK to load...');
+        var checkSDK = setInterval(function() {
+            if (typeof window.PaypercutCheckout !== 'undefined') {
+                console.log('PaypercutCheckout SDK loaded');
+                clearInterval(checkSDK);
+                fetchCheckoutSession();
+            }
+        }, 100);
+        
+        setTimeout(function() {
+            if (typeof window.PaypercutCheckout === 'undefined') {
+                console.error('PaypercutCheckout SDK failed to load after 10 seconds');
+                clearInterval(checkSDK);
+                document.getElementById('payment-error-message').textContent = 'Failed to load payment SDK. Please refresh the page.';
+                document.getElementById('payment-error-container').style.display = 'block';
+                document.getElementById('paypercut-loading').style.display = 'none';
+            }
+        }, 10000);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', waitForSDKAndInit);
+
+{% else %}
+// Hosted mode - Create checkout on button click
+document.getElementById('button-confirm').addEventListener('click', function() {
+    if (paymentProcessing) {
+        return;
+    }
+    
+    paymentProcessing = true;
+    document.getElementById('payment-error-container').style.display = 'none';
+    
+    var button = this;
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> {{ text_loading }}';
+    
+    fetch('index.php?route=extension/paypercut/payment/paypercut|send', {
+        method: 'GET'
+    })
+    .then(response => response.json())
+    .then(json => {
+        if (json.error) {
+            document.getElementById('payment-error-message').textContent = json.error;
+            document.getElementById('payment-error-container').style.display = 'block';
+            button.disabled = false;
+            button.textContent = '{{ button_confirm }}';
+            paymentProcessing = false;
+        } else if (json.redirect) {
+            window.location.href = json.redirect;
+        } else {
+            document.getElementById('payment-error-message').textContent = 'An unexpected error occurred. Please try again.';
+            document.getElementById('payment-error-container').style.display = 'block';
+            button.disabled = false;
+            button.textContent = '{{ button_confirm }}';
+            paymentProcessing = false;
+        }
+    })
+    .catch(error => {
+        console.error('Payment Error:', error);
+        document.getElementById('payment-error-message').textContent = 'Connection error. Please check your internet connection.';
+        document.getElementById('payment-error-container').style.display = 'block';
+        button.disabled = false;
+        button.textContent = '{{ button_confirm }}';
+        paymentProcessing = false;
+    });
+});
+{% endif %}
+</script>

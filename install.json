@@ -1,0 +1,9 @@
+{
+    "name": "Paypercut Payments",
+    "code": "paypercut",
+    "version": "1.0.1",
+    "author": "Paypercut",
+    "link": "https://paypercut.io",
+    "license": "GPL-3.0",
+    "description": "Accept payments via Paypercut payment gateway including card payments, Google Pay, and Apple Pay."
+}
