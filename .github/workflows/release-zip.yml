@@ -99,7 +99,8 @@ jobs:
           zipinfo -1 "$ZIP" | head -80
 
           # Ensure module lives under paypercut/
-          zipinfo -1 "$ZIP" | grep -x "upload/" >/dev/null
+          zipinfo -1 "$ZIP" | grep -x "admin/" >/dev/null
+          zipinfo -1 "$ZIP" | grep -x "catalog/" >/dev/null
           zipinfo -1 "$ZIP" | grep -x "install.json" >/dev/null
 
       - name: Create GitHub Release + upload ZIP
