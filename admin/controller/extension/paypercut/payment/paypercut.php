@@ -379,11 +379,11 @@ class Paypercut extends \Opencart\System\Engine\Controller
                 } else {
                     $api_url = 'https://api.paypercut.io/v1/webhooks';
 
-                    // Create webhook with all events enabled
+                    // Create webhook with specific events enabled
                     $payload = [
                         'name' => 'OpenCart - ' . $catalog_url,
                         'url' => $webhook_url,
-                        'enabled_events' => ['*'] // All events
+                        'enabled_events' => ['checkout_session.completed']
                     ];
 
                     $ch = curl_init();
