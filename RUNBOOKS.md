@@ -12,11 +12,11 @@ the Paypercut payment module for OpenCart 4.
 
 The module consists of three logical components:
 
-| Component | Location | Purpose |
-| --- | --- | --- |
-| Admin controller | `admin/controller/extension/paypercut/payment/` | Settings, webhook management, logs UI, refunds |
+| Component          | Location                                                       | Purpose                                               |
+| ------------------ | -------------------------------------------------------------- | ----------------------------------------------------- |
+| Admin controller   | `admin/controller/extension/paypercut/payment/`                | Settings, webhook management, logs UI, refunds        |
 | Catalog controller | `catalog/controller/extension/paypercut/payment/paypercut.php` | Checkout session creation, callback, webhook receiver |
-| Language packs | `admin/language/*`, `catalog/language/*` | 13 locales |
+| Language packs     | `admin/language/*`, `catalog/language/*`                       | 13 locales                                            |
 
 Runtime dependencies: PHP 8.0+ with cURL, an OpenCart 4.x store served over HTTPS,
 and a Paypercut account with an API key (`sk_test_…` or `sk_live_…`).
@@ -58,11 +58,11 @@ and a Paypercut account with an API key (`sk_test_…` or `sk_live_…`).
 2. Delete the webhook from the settings page **before** uninstalling (otherwise
    delete it manually in the Paypercut Dashboard → Developers → Webhooks).
 3. Optional: drop module tables
-   ```sql
-   DROP TABLE oc_paypercut_webhook_log;
-   DROP TABLE oc_paypercut_transaction;
-   DROP TABLE oc_paypercut_pending_checkout;
-   ```
+    ```sql
+    DROP TABLE oc_paypercut_webhook_log;
+    DROP TABLE oc_paypercut_transaction;
+    DROP TABLE oc_paypercut_pending_checkout;
+    ```
 
 ---
 
@@ -70,16 +70,16 @@ and a Paypercut account with an API key (`sk_test_…` or `sk_live_…`).
 
 Settings live in `oc_setting` under the code `payment_paypercut`.
 
-| Setting | Required | Notes |
-| --- | --- | --- |
-| API Key | ✅ | `sk_test_…` = test mode, `sk_live_…` = live mode (auto-detected) |
-| Operating Account ID | ✅ | From Paypercut Dashboard |
-| Statement Descriptor |   | Max 22 chars, shown on customer bank statements |
-| Checkout Mode | ✅ | `hosted` (redirect) or `embedded` (on-site) |
-| Google Pay / Apple Pay |   | Requires registered payment method domain |
-| Payment Method Configuration |   | Paypercut profile id to restrict methods |
-| Order Status |   | Defaults to Processing |
-| Enable Logging |   | **Disable in production** unless debugging |
+| Setting                      | Required | Notes                                                            |
+| ---------------------------- | -------- | ---------------------------------------------------------------- |
+| API Key                      | ✅       | `sk_test_…` = test mode, `sk_live_…` = live mode (auto-detected) |
+| Operating Account ID         | ✅       | From Paypercut Dashboard                                         |
+| Statement Descriptor         |          | Max 22 chars, shown on customer bank statements                  |
+| Checkout Mode                | ✅       | `hosted` (redirect) or `embedded` (on-site)                      |
+| Google Pay / Apple Pay       |          | Requires registered payment method domain                        |
+| Payment Method Configuration |          | Paypercut profile id to restrict methods                         |
+| Order Status                 |          | Defaults to Processing                                           |
+| Enable Logging               |          | **Disable in production** unless debugging                       |
 
 ### 4.1 Verify API key
 
@@ -135,11 +135,11 @@ rejected with HTTP 400 and logged to `paypercut_error.log`.
 
 ## 6. Logs & Diagnostics
 
-| Source | Location | Cleared by |
-| --- | --- | --- |
-| Webhook events | DB table `oc_paypercut_webhook_log` | **Clear Logs** button in admin |
-| Error log | `storage/logs/paypercut_error.log` | **Clear Log** button / `unlink()` |
-| OpenCart error log | `storage/logs/error.log` | OpenCart admin |
+| Source             | Location                            | Cleared by                        |
+| ------------------ | ----------------------------------- | --------------------------------- |
+| Webhook events     | DB table `oc_paypercut_webhook_log` | **Clear Logs** button in admin    |
+| Error log          | `storage/logs/paypercut_error.log`  | **Clear Log** button / `unlink()` |
+| OpenCart error log | `storage/logs/error.log`            | OpenCart admin                    |
 
 Admin UI: **Extensions → Payments → Paypercut Payments → View Logs**
 (route `extension/paypercut/payment/paypercut_logs`). Supports filtering
@@ -169,9 +169,9 @@ history has no "Payment completed" entry.
 2. If the event is missing → webhook delivery failed (see [7.3](#73-webhook-not-firing)).
 3. If the event is present with `processed = 0` → inspect `error_log` for the
    corresponding timestamp; common causes:
-   - Order id not found in `oc_paypercut_pending_checkout` (session dropped
-     before callback stored it)
-   - Signature mismatch (secret was rotated in dashboard)
+    - Order id not found in `oc_paypercut_pending_checkout` (session dropped
+      before callback stored it)
+    - Signature mismatch (secret was rotated in dashboard)
 4. Manual resolution: add order history in admin with the correct status, then
    record transaction details from Paypercut Dashboard in order comments.
 
@@ -182,10 +182,10 @@ history has no "Payment completed" entry.
 2. Re-send a recent event from the dashboard and watch the Paypercut Logs
    page — a new row should appear within a few seconds.
 3. If nothing arrives:
-   - Confirm the storefront is reachable over public HTTPS (no basic-auth,
-     no IP allowlist blocking Paypercut).
-   - Check web-server logs for 4xx/5xx on the webhook route.
-   - Temporarily enable module logging and replay.
+    - Confirm the storefront is reachable over public HTTPS (no basic-auth,
+      no IP allowlist blocking Paypercut).
+    - Check web-server logs for 4xx/5xx on the webhook route.
+    - Temporarily enable module logging and replay.
 4. Recreate the webhook: **Delete Webhook** then **Create Webhook Automatically**.
 
 ### 7.4 Apple Pay / Google Pay button missing
@@ -246,11 +246,11 @@ Verification:
 
 ## 9. Escalation
 
-| Tier | Contact | Use when |
-| --- | --- | --- |
-| L1 | Merchant's OpenCart admin | UI / configuration issues |
-| L2 | Integrator running this plugin | Webhook, logs, order-state issues |
-| L3 | Paypercut Support (`support@paypercut.io`) | API errors, dashboard issues, domain verification |
+| Tier | Contact                                    | Use when                                          |
+| ---- | ------------------------------------------ | ------------------------------------------------- |
+| L1   | Merchant's OpenCart admin                  | UI / configuration issues                         |
+| L2   | Integrator running this plugin             | Webhook, logs, order-state issues                 |
+| L3   | Paypercut Support (`support@paypercut.io`) | API errors, dashboard issues, domain verification |
 
 When escalating to Paypercut Support include:
 
