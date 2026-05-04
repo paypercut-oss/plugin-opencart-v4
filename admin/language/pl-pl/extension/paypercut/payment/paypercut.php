@@ -14,6 +14,7 @@ $_['entry_operating_account'] = 'ID Konta Operacyjnego';
 $_['entry_statement_descriptor'] = 'Deskryptor Wyciągu';
 $_['entry_google_pay'] = 'Google Pay';
 $_['entry_apple_pay'] = 'Apple Pay';
+$_['entry_applepay_domain_file'] = 'Plik Domeny Apple Pay';
 $_['entry_checkout_mode'] = 'Tryb Realizacji Zamówienia';
 $_['entry_webhook_url'] = 'Adres URL Webhooka';
 $_['entry_order_status'] = 'Status Zamówienia';
@@ -28,6 +29,7 @@ $_['help_operating_account'] = 'Wprowadź ID swojego konta operacyjnego (znajduj
 $_['help_statement_descriptor'] = 'Tekst wyświetlany na wyciągu bankowym klienta (maks. 22 znaki). Pozostaw puste, aby użyć domyślnego.';
 $_['help_google_pay'] = 'Włącz Google Pay jako opcję płatności';
 $_['help_apple_pay'] = 'Włącz Apple Pay jako opcję płatności';
+$_['help_applepay_domain_file'] = 'Apple Pay wymaga pliku weryfikacji domeny pod adresem <code>/.well-known/apple-developer-merchantid-domain-association</code>. Wtyczka wdraża go automatycznie podczas instalacji oraz przy zapisywaniu ustawień.';
 $_['help_checkout_mode'] = 'Wybierz między hostowanym (przekierowanie na stronę Paypercut) lub wbudowanym (płatność na Twojej stronie) doświadczeniem płatności';
 $_['help_webhook_url'] = 'Skopiuj ten adres URL i skonfiguruj go w panelu Paypercut w zakładce Developers > Webhooks';
 $_['help_logging'] = 'Włącz logowanie żądań API, zdarzeń webhook i błędów. Wyłącz w środowisku produkcyjnym, chyba że debugujesz. Logi mogą zawierać poufne dane.';
@@ -38,6 +40,7 @@ $_['error_permission'] = 'Ostrzeżenie: Nie masz uprawnień do modyfikacji modu�
 $_['error_api_key'] = 'Wymagany klucz API!';
 $_['error_statement_descriptor'] = 'Deskryptor wyciągu nie może przekraczać 22 znaków!';
 $_['error_unsupported_currency'] = 'Ostrzeżenie: Waluta Twojego sklepu (%s) nie jest obsługiwana przez Paypercut. Obsługiwane waluty: BGN, DKK, SEK, NOK, GBP, EUR, USD, CHF, CZK, HUF, PLN, RON';
+$_['error_applepay_domain_write'] = 'Nie udało się zapisać pliku weryfikacji Apple Pay (ścieżka docelowa: %s). Sprawdź uprawnienia systemu plików dla katalogu głównego OpenCart.';
 
 // Text
 $_['text_mode_test'] = 'Tryb Testowy';
@@ -59,6 +62,15 @@ $_['text_wallet_settings'] = 'Ustawienia Portfela';
 $_['text_testing_connection'] = 'Testowanie połączenia...';
 $_['text_connection_success'] = 'Połączenie udane!';
 $_['text_connection_failed'] = 'Połączenie nieudane';
+
+// Apple Pay domain verification file
+$_['text_applepay_domain_ok'] = 'Plik domeny Apple Pay zweryfikowany';
+$_['text_applepay_domain_warning'] = 'Plik domeny Apple Pay wdrożony, ale niezweryfikowany';
+$_['text_applepay_domain_missing'] = 'Brak pliku domeny Apple Pay';
+$_['text_applepay_domain_path'] = 'Ścieżka: %s';
+$_['text_applepay_domain_refreshing'] = 'Odświeżanie z PayPerCut CDN...';
+$_['text_applepay_domain_manual_help'] = 'Pobierz <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">plik weryfikacyjny</a> i umieść go ręcznie w:';
+$_['button_applepay_domain_refresh'] = 'Odśwież z PayPerCut CDN';
 
 // Button
 $_['button_test_connection'] = 'Testuj Połączenie';

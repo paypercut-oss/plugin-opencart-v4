@@ -14,6 +14,7 @@ $_['entry_operating_account'] = 'ID de Cuenta Operativa';
 $_['entry_statement_descriptor'] = 'Descriptor de Extracto';
 $_['entry_google_pay'] = 'Google Pay';
 $_['entry_apple_pay'] = 'Apple Pay';
+$_['entry_applepay_domain_file'] = 'Archivo de Dominio Apple Pay';
 $_['entry_checkout_mode'] = 'Modo de Pago';
 $_['entry_webhook_url'] = 'URL de Webhook';
 $_['entry_order_status'] = 'Estado del Pedido';
@@ -28,6 +29,7 @@ $_['help_operating_account'] = 'Ingrese su ID de Cuenta Operativa (se encuentra 
 $_['help_statement_descriptor'] = 'Texto que aparece en el extracto bancario del cliente (máximo 22 caracteres). Dejar vacío para usar el predeterminado.';
 $_['help_google_pay'] = 'Habilitar Google Pay como opción de pago';
 $_['help_apple_pay'] = 'Habilitar Apple Pay como opción de pago';
+$_['help_applepay_domain_file'] = 'Apple Pay requiere un archivo de verificación de dominio en <code>/.well-known/apple-developer-merchantid-domain-association</code>. El módulo lo despliega automáticamente al instalar y al guardar la configuración.';
 $_['help_checkout_mode'] = 'Elija entre alojado (redirigir a página de Paypercut) o integrado (pago en su sitio)';
 $_['help_webhook_url'] = 'Copie esta URL y configúrela en su Panel de Paypercut en Desarrolladores > Webhooks';
 $_['help_logging'] = 'Habilitar registro de solicitudes API, eventos webhook y errores. Desactivar en producción a menos que esté depurando. Los registros pueden contener datos sensibles.';
@@ -38,6 +40,7 @@ $_['error_permission'] = 'Advertencia: ¡No tienes permiso para modificar el mó
 $_['error_api_key'] = '¡Clave API Requerida!';
 $_['error_statement_descriptor'] = '¡El descriptor de extracto debe tener 22 caracteres o menos!';
 $_['error_unsupported_currency'] = 'Advertencia: La moneda de su tienda (%s) no es compatible con Paypercut. Monedas compatibles: BGN, DKK, SEK, NOK, GBP, EUR, USD, CHF, CZK, HUF, PLN, RON';
+$_['error_applepay_domain_write'] = 'No se pudo escribir el archivo de verificación de Apple Pay (ruta de destino: %s). Verifique los permisos del sistema de archivos para la raíz web de OpenCart.';
 
 // Text
 $_['text_mode_test'] = 'Modo de Prueba';
@@ -59,6 +62,15 @@ $_['text_wallet_settings'] = 'Configuración de Billetera';
 $_['text_testing_connection'] = 'Probando conexión...';
 $_['text_connection_success'] = '¡Conexión exitosa!';
 $_['text_connection_failed'] = 'Conexión fallida';
+
+// Apple Pay domain verification file
+$_['text_applepay_domain_ok'] = 'Archivo de dominio Apple Pay verificado';
+$_['text_applepay_domain_warning'] = 'Archivo de dominio Apple Pay desplegado pero no verificado';
+$_['text_applepay_domain_missing'] = 'Falta el archivo de dominio Apple Pay';
+$_['text_applepay_domain_path'] = 'Ruta: %s';
+$_['text_applepay_domain_refreshing'] = 'Actualizando desde PayPerCut CDN...';
+$_['text_applepay_domain_manual_help'] = 'Descargue <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">el archivo de verificación</a> y colóquelo manualmente en:';
+$_['button_applepay_domain_refresh'] = 'Actualizar desde PayPerCut CDN';
 
 // Button
 $_['button_test_connection'] = 'Probar Conexión';

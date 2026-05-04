@@ -14,6 +14,7 @@ $_['entry_operating_account'] = 'Működési számla azonosító';
 $_['entry_statement_descriptor'] = 'Számla leírás';
 $_['entry_google_pay'] = 'Google Pay';
 $_['entry_apple_pay'] = 'Apple Pay';
+$_['entry_applepay_domain_file'] = 'Apple Pay tartományfájl';
 $_['entry_checkout_mode'] = 'Fizetési mód';
 $_['entry_webhook_url'] = 'Webhook URL';
 $_['entry_order_status'] = 'Rendelés állapota';
@@ -28,6 +29,7 @@ $_['help_operating_account'] = 'Adja meg a működési számla azonosítóját (
 $_['help_statement_descriptor'] = 'Szöveg, amely megjelenik az ügyfél bankszámla kivonatán (maximum 22 karakter). Hagyja üresen az alapértelmezett használatához.';
 $_['help_google_pay'] = 'Google Pay engedélyezése fizetési lehetőségként';
 $_['help_apple_pay'] = 'Apple Pay engedélyezése fizetési lehetőségként';
+$_['help_applepay_domain_file'] = 'Az Apple Pay-hez tartomány-ellenőrző fájl szükséges itt: <code>/.well-known/apple-developer-merchantid-domain-association</code>. A bővítmény telepítéskor és a beállítások mentésekor automatikusan kihelyezi.';
 $_['help_checkout_mode'] = 'Válasszon a tárolt (átirányítás a Paypercut oldalára) vagy beágyazott (fizetés a saját webhelyén) fizetési élmény között';
 $_['help_webhook_url'] = 'Másolja ezt az URL-t és konfigurálja a Paypercut vezérlőpultban a Fejlesztők > Webhookok menüpontban';
 $_['help_logging'] = 'API kérések, webhook események és hibák naplózásának engedélyezése. Tiltsa le éles környezetben, kivéve hibakereséskor. A naplók érzékeny adatokat tartalmazhatnak.';
@@ -38,6 +40,7 @@ $_['error_permission'] = 'Figyelmeztetés: Nincs jogosultsága a Paypercut fizet
 $_['error_api_key'] = 'API kulcs kötelező!';
 $_['error_statement_descriptor'] = 'A számla leírás nem lehet hosszabb 22 karakternél!';
 $_['error_unsupported_currency'] = 'Figyelmeztetés: Az áruház pénzneme (%s) nem támogatott a Paypercut által. Támogatott pénznemek: BGN, DKK, SEK, NOK, GBP, EUR, USD, CHF, CZK, HUF, PLN, RON';
+$_['error_applepay_domain_write'] = 'Nem sikerült írni az Apple Pay ellenőrző fájlt (célútvonal: %s). Ellenőrizze az OpenCart webroot fájlrendszer-jogosultságait.';
 
 // Text
 $_['text_mode_test'] = 'Teszt mód';
@@ -59,6 +62,15 @@ $_['text_wallet_settings'] = 'Tárca beállítások';
 $_['text_testing_connection'] = 'Kapcsolat tesztelése...';
 $_['text_connection_success'] = 'Kapcsolat sikeres!';
 $_['text_connection_failed'] = 'Kapcsolat sikertelen';
+
+// Apple Pay domain verification file
+$_['text_applepay_domain_ok'] = 'Apple Pay tartományfájl ellenőrizve';
+$_['text_applepay_domain_warning'] = 'Apple Pay tartományfájl kihelyezve, de nincs ellenőrizve';
+$_['text_applepay_domain_missing'] = 'Az Apple Pay tartományfájl hiányzik';
+$_['text_applepay_domain_path'] = 'Útvonal: %s';
+$_['text_applepay_domain_refreshing'] = 'Frissítés a PayPerCut CDN-ről...';
+$_['text_applepay_domain_manual_help'] = 'Töltse le <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">az ellenőrzőfájlt</a>, és helyezze el kézzel itt:';
+$_['button_applepay_domain_refresh'] = 'Frissítés a PayPerCut CDN-ről';
 
 // Button
 $_['button_test_connection'] = 'Kapcsolat tesztelése';

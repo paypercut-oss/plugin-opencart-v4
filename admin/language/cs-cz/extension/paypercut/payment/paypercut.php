@@ -14,6 +14,7 @@ $_['entry_operating_account'] = 'ID provozního účtu';
 $_['entry_statement_descriptor'] = 'Popisek na výpisu';
 $_['entry_google_pay'] = 'Google Pay';
 $_['entry_apple_pay'] = 'Apple Pay';
+$_['entry_applepay_domain_file'] = 'Soubor domény Apple Pay';
 $_['entry_checkout_mode'] = 'Režim platby';
 $_['entry_webhook_url'] = 'URL webhooku';
 $_['entry_order_status'] = 'Stav objednávky';
@@ -28,6 +29,7 @@ $_['help_operating_account'] = 'Zadejte ID vašeho provozního účtu (najdete v
 $_['help_statement_descriptor'] = 'Text, který se zobrazí na bankovním výpisu zákazníka (max 22 znaků). Nechte prázdné pro použití výchozího.';
 $_['help_google_pay'] = 'Povolit Google Pay jako platební možnost';
 $_['help_apple_pay'] = 'Povolit Apple Pay jako platební možnost';
+$_['help_applepay_domain_file'] = 'Apple Pay vyžaduje ověřovací soubor na adrese <code>/.well-known/apple-developer-merchantid-domain-association</code>. Plugin jej automaticky nasadí při instalaci a při uložení nastavení.';
 $_['help_checkout_mode'] = 'Vyberte mezi hostovaným (přesměrování na stránku Paypercut) nebo vloženým (platba na vašem webu) platebním prostředím';
 $_['help_webhook_url'] = 'Zkopírujte tuto URL a nakonfigurujte ji ve vašem Paypercut Dashboardu v sekci Developers > Webhooks';
 $_['help_logging'] = 'Povolit logování API požadavků, webhook událostí a chyb. Vypněte v produkci, pokud neladíte. Logy mohou obsahovat citlivá data.';
@@ -38,6 +40,7 @@ $_['error_permission'] = 'Varování: Nemáte oprávnění upravovat platební m
 $_['error_api_key'] = 'API klíč je povinný!';
 $_['error_statement_descriptor'] = 'Popisek na výpisu nesmí být delší než 22 znaků!';
 $_['error_unsupported_currency'] = 'Varování: Měna vašeho obchodu (%s) není podporována Paypercut. Podporované měny: BGN, DKK, SEK, NOK, GBP, EUR, USD, CHF, CZK, HUF, PLN, RON';
+$_['error_applepay_domain_write'] = 'Nelze zapsat ověřovací soubor Apple Pay (cílová cesta: %s). Zkontrolujte oprávnění souborového systému pro kořenový adresář OpenCart.';
 
 // Text
 $_['text_mode_test'] = 'Testovací režim';
@@ -59,6 +62,15 @@ $_['text_wallet_settings'] = 'Nastavení peněženky';
 $_['text_testing_connection'] = 'Testování připojení...';
 $_['text_connection_success'] = 'Připojení úspěšné!';
 $_['text_connection_failed'] = 'Připojení selhalo';
+
+// Apple Pay domain verification file
+$_['text_applepay_domain_ok'] = 'Soubor domény Apple Pay byl ověřen';
+$_['text_applepay_domain_warning'] = 'Soubor domény Apple Pay byl nasazen, ale není ověřen';
+$_['text_applepay_domain_missing'] = 'Soubor domény Apple Pay chybí';
+$_['text_applepay_domain_path'] = 'Cesta: %s';
+$_['text_applepay_domain_refreshing'] = 'Obnovuje se z PayPerCut CDN...';
+$_['text_applepay_domain_manual_help'] = 'Stáhněte <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">ověřovací soubor</a> a ručně jej umístěte do:';
+$_['button_applepay_domain_refresh'] = 'Obnovit z PayPerCut CDN';
 
 // Button
 $_['button_test_connection'] = 'Test připojení';
