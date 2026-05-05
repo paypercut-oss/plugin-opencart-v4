@@ -14,6 +14,7 @@ $_['entry_operating_account'] = 'Driftskonto-ID';
 $_['entry_statement_descriptor'] = 'Kontoutskriftsbeskrivelse';
 $_['entry_google_pay'] = 'Google Pay';
 $_['entry_apple_pay'] = 'Apple Pay';
+$_['entry_applepay_domain_file'] = 'Apple Pay-domenefil';
 $_['entry_checkout_mode'] = 'Kassemodus';
 $_['entry_webhook_url'] = 'Webhook URL';
 $_['entry_order_status'] = 'Ordrestatus';
@@ -28,6 +29,7 @@ $_['help_operating_account'] = 'Skriv inn din Driftskonto-ID (finnes i Paypercut
 $_['help_statement_descriptor'] = 'Tekst som vises på kundens kontoutskrift (maks 22 tegn). La stå tom for å bruke standard.';
 $_['help_google_pay'] = 'Aktiver Google Pay som betalingsalternativ';
 $_['help_apple_pay'] = 'Aktiver Apple Pay som betalingsalternativ';
+$_['help_applepay_domain_file'] = 'Apple Pay krever en domeneverifiseringsfil på <code>/.well-known/apple-developer-merchantid-domain-association</code>. Modulen distribuerer den automatisk ved installasjon og når innstillinger lagres.';
 $_['help_checkout_mode'] = 'Velg mellom vertshåndtert (omdirigering til Paypercut-side) eller innebygd (kasse på din side) betalingsopplevelse';
 $_['help_webhook_url'] = 'Kopier denne URL-en og konfigurer den i Paypercut-kontrollpanelet under Utviklere > Webhooks';
 $_['help_logging'] = 'Aktiver logging av API-forespørsler, webhook-hendelser og feil. Deaktiver i produksjon med mindre du feilsøker. Logger kan inneholde sensitive data.';
@@ -38,6 +40,7 @@ $_['error_permission'] = 'Advarsel: Du har ikke tillatelse til å endre Paypercu
 $_['error_api_key'] = 'API-nøkkel er påkrevd!';
 $_['error_statement_descriptor'] = 'Kontoutskriftsbeskrivelsen må være 22 tegn eller mindre!';
 $_['error_unsupported_currency'] = 'Advarsel: Din butikkvaluta (%s) støttes ikke av Paypercut. Støttede valutaer: BGN, DKK, SEK, NOK, GBP, EUR, USD, CHF, CZK, HUF, PLN, RON';
+$_['error_applepay_domain_write'] = 'Kunne ikke skrive Apple Pay-verifiseringsfilen (målsti: %s). Sjekk filsystemtillatelser for OpenCarts webroot.';
 
 // Text
 $_['text_mode_test'] = 'Testmodus';
@@ -59,6 +62,15 @@ $_['text_wallet_settings'] = 'Lommebokinnstillinger';
 $_['text_testing_connection'] = 'Tester tilkobling...';
 $_['text_connection_success'] = 'Tilkobling vellykket!';
 $_['text_connection_failed'] = 'Tilkobling mislyktes';
+
+// Apple Pay domain verification file
+$_['text_applepay_domain_ok'] = 'Apple Pay-domenefil verifisert';
+$_['text_applepay_domain_warning'] = 'Apple Pay-domenefil distribuert, men ikke verifisert';
+$_['text_applepay_domain_missing'] = 'Apple Pay-domenefil mangler';
+$_['text_applepay_domain_path'] = 'Sti: %s';
+$_['text_applepay_domain_refreshing'] = 'Oppdaterer fra PayPerCut CDN...';
+$_['text_applepay_domain_manual_help'] = 'Last ned <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">verifiseringsfilen</a>, og plasser den manuelt på:';
+$_['button_applepay_domain_refresh'] = 'Oppdater fra PayPerCut CDN';
 
 // Button
 $_['button_test_connection'] = 'Test tilkobling';

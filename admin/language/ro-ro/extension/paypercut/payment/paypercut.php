@@ -14,6 +14,7 @@ $_['entry_operating_account'] = 'ID Cont Operațional';
 $_['entry_statement_descriptor'] = 'Descriptor Extras';
 $_['entry_google_pay'] = 'Google Pay';
 $_['entry_apple_pay'] = 'Apple Pay';
+$_['entry_applepay_domain_file'] = 'Fișier Domeniu Apple Pay';
 $_['entry_checkout_mode'] = 'Mod Finalizare Comandă';
 $_['entry_webhook_url'] = 'URL Webhook';
 $_['entry_order_status'] = 'Status Comandă';
@@ -28,6 +29,7 @@ $_['help_operating_account'] = 'Introduceți ID-ul contului operațional (se gă
 $_['help_statement_descriptor'] = 'Text care apare pe extrasul bancar al clientului (maxim 22 caractere). Lăsați gol pentru a utiliza valoarea implicită.';
 $_['help_google_pay'] = 'Activează Google Pay ca opțiune de plată';
 $_['help_apple_pay'] = 'Activează Apple Pay ca opțiune de plată';
+$_['help_applepay_domain_file'] = 'Apple Pay necesită un fișier de verificare a domeniului la <code>/.well-known/apple-developer-merchantid-domain-association</code>. Modulul îl implementează automat la instalare și la salvarea setărilor.';
 $_['help_checkout_mode'] = 'Alegeți între găzduit (redirecționare către pagina Paypercut) sau încorporat (finalizare pe site-ul dvs.) experiență de plată';
 $_['help_webhook_url'] = 'Copiați acest URL și configurați-l în tabloul de bord Paypercut la Dezvoltatori > Webhooks';
 $_['help_logging'] = 'Activează jurnalizarea cererilor API, evenimentelor webhook și erorilor. Dezactivați în producție, cu excepția cazului în care depanați. Jurnalele pot conține date sensibile.';
@@ -38,6 +40,7 @@ $_['error_permission'] = 'Avertisment: Nu aveți permisiunea de a modifica modul
 $_['error_api_key'] = 'Cheie API necesară!';
 $_['error_statement_descriptor'] = 'Descriptorul extrasului trebuie să aibă maxim 22 de caractere!';
 $_['error_unsupported_currency'] = 'Avertisment: Moneda magazinului dvs. (%s) nu este suportată de Paypercut. Monede suportate: BGN, DKK, SEK, NOK, GBP, EUR, USD, CHF, CZK, HUF, PLN, RON';
+$_['error_applepay_domain_write'] = 'Nu s-a putut scrie fișierul de verificare Apple Pay (cale destinație: %s). Verificați permisiunile sistemului de fișiere pentru webroot-ul OpenCart.';
 
 // Text
 $_['text_mode_test'] = 'Mod Test';
@@ -59,6 +62,15 @@ $_['text_wallet_settings'] = 'Setări Portofel';
 $_['text_testing_connection'] = 'Se testează conexiunea...';
 $_['text_connection_success'] = 'Conexiune reușită!';
 $_['text_connection_failed'] = 'Conexiune eșuată';
+
+// Apple Pay domain verification file
+$_['text_applepay_domain_ok'] = 'Fișier domeniu Apple Pay verificat';
+$_['text_applepay_domain_warning'] = 'Fișier domeniu Apple Pay implementat, dar neverificat';
+$_['text_applepay_domain_missing'] = 'Fișierul de domeniu Apple Pay lipsește';
+$_['text_applepay_domain_path'] = 'Cale: %s';
+$_['text_applepay_domain_refreshing'] = 'Se reîmprospătează de la PayPerCut CDN...';
+$_['text_applepay_domain_manual_help'] = 'Descărcați <a href="https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association" target="_blank">fișierul de verificare</a> și plasați-l manual la:';
+$_['button_applepay_domain_refresh'] = 'Reîmprospătare de la PayPerCut CDN';
 
 // Button
 $_['button_test_connection'] = 'Testează Conexiunea';

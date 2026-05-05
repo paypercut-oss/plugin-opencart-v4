@@ -167,6 +167,52 @@
                     </div>
                   </div>
                   <div class="row mb-3">
+                    <label class="col-sm-2 col-form-label">
+                      <i class="fab fa-apple"></i> {{ entry_applepay_domain_file }}
+                      <span data-bs-toggle="tooltip" title="{{ help_applepay_domain_file }}">
+                        <i class="fas fa-question-circle"></i>
+                      </span>
+                    </label>
+                    <div class="col-sm-10">
+                      <div id="applepay-domain-status">
+                        {% if applepay_domain_status.state == 'ok' %}
+                          <div class="card bg-success bg-opacity-10 border-success">
+                            <div class="card-body">
+                              <h5><span class="badge bg-success"><i class="fas fa-check"></i> {{ text_applepay_domain_ok }}</span></h5>
+                              <p class="mt-2 mb-1"><i class="fas fa-link"></i> <a href="{{ applepay_domain_status.public_url }}" target="_blank"><code>{{ applepay_domain_status.public_url }}</code></a></p>
+                              <button type="button" class="btn btn-secondary btn-sm mt-2" onclick="refreshAppleDomainFile()" data-bs-toggle="tooltip" title="{{ button_applepay_domain_refresh }}">
+                                <i class="fas fa-sync-alt"></i> {{ button_applepay_domain_refresh }}
+                              </button>
+                            </div>
+                          </div>
+                        {% elseif applepay_domain_status.state == 'missing' %}
+                          <div class="card bg-danger bg-opacity-10 border-danger">
+                            <div class="card-body">
+                              <h5><span class="badge bg-danger"><i class="fas fa-times-circle"></i> {{ text_applepay_domain_missing }}</span></h5>
+                              <p class="mt-2 mb-1">{{ applepay_domain_status.message }}</p>
+                              <p class="mt-1 mb-1"><small>{{ text_applepay_domain_manual_help|raw }} <code>{{ applepay_domain_status.local_path }}</code></small></p>
+                              <button type="button" class="btn btn-primary btn-sm mt-2" onclick="refreshAppleDomainFile()" data-bs-toggle="tooltip" title="{{ button_applepay_domain_refresh }}">
+                                <i class="fas fa-sync-alt"></i> {{ button_applepay_domain_refresh }}
+                              </button>
+                            </div>
+                          </div>
+                        {% else %}
+                          <div class="card bg-warning bg-opacity-10 border-warning">
+                            <div class="card-body">
+                              <h5><span class="badge bg-warning text-dark"><i class="fas fa-exclamation-triangle"></i> {{ text_applepay_domain_warning }}</span></h5>
+                              <p class="mt-2 mb-1">{{ applepay_domain_status.message }}</p>
+                              <p class="mt-1 mb-1"><small><i class="fas fa-link"></i> <a href="{{ applepay_domain_status.public_url }}" target="_blank"><code>{{ applepay_domain_status.public_url }}</code></a></small></p>
+                              <button type="button" class="btn btn-primary btn-sm mt-2" onclick="refreshAppleDomainFile()" data-bs-toggle="tooltip" title="{{ button_applepay_domain_refresh }}">
+                                <i class="fas fa-sync-alt"></i> {{ button_applepay_domain_refresh }}
+                              </button>
+                            </div>
+                          </div>
+                        {% endif %}
+                      </div>
+                      <div class="form-text"><i class="fas fa-info-circle"></i> {{ help_applepay_domain_file|raw }}</div>
+                    </div>
+                  </div>
+                  <div class="row mb-3">
                     <label class="col-sm-2 col-form-label" for="input-checkout-mode">
                       <i class="fas fa-desktop"></i> {{ entry_checkout_mode }}
                       <span data-bs-toggle="tooltip" title="{{ help_checkout_mode }}">
@@ -460,6 +506,34 @@ function deleteWebhook() {
     .catch(error => {
         alert('Error deleting webhook: ' + error);
         location.reload();
+    });
+}
+
+// Refresh Apple Pay domain verification file from PayPerCut CDN
+function refreshAppleDomainFile() {
+    var container = document.getElementById('applepay-domain-status');
+    var original = container.innerHTML;
+    container.innerHTML = '<div class="alert alert-info"><i class="fas fa-spinner fa-spin"></i> {{ text_applepay_domain_refreshing }}</div>';
+
+    fetch('index.php?route=extension/paypercut/payment/paypercut|refreshAppleDomainFile&user_token={{ user_token }}', {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(json => {
+        if (json.error) {
+            var msg = json.error;
+            if (json.reason) {
+                msg += ' (reason: ' + json.reason + ')';
+            }
+            alert(msg);
+            container.innerHTML = original;
+        } else if (json.success) {
+            location.reload();
+        }
+    })
+    .catch(error => {
+        alert('Error refreshing Apple Pay domain file: ' + error);
+        container.innerHTML = original;
     });
 }
 </script>
