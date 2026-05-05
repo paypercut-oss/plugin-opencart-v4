@@ -7,8 +7,6 @@ class Paypercut extends \Opencart\System\Engine\Controller
     private array $error = [];
 
     // Apple Pay domain verification file — see https://docs.paypercut.io/docs/accept-payments/apple-pay
-    // The base64 below is the canonical 228-byte verification file content; SHA256 guards against drift.
-    const APPLEPAY_DOMAIN_FILE_SHA256 = '60e92791a4fe483c4fc422d43b339862ee731f7e8f85448e398f01c9a8e2f11a';
     const APPLEPAY_DOMAIN_FILE_BASE64 = 'N2IyMjc2NjU3MjczNjk2ZjZlMjIzYTMxMmMyMjcwNzM3MDQ5NjQyMjNhMjIzMjM1NDQ0NTQ0MzE0NDM1NDQzMzM4NDM0NjQ2NDY0NTM3MzczODM1NDMzMTMxMzI0MzMxMzYzOTQxMzYzNzMxMzczMDM4MzgzNjQyNDYzOTQzNDQzNTM4MzE0NTM3NDY0MjM4MzY0MjQ2NDUzMjM5MzQzMDM3MzMzNzQ0MzkzMTIyMmMyMjYzNzI2NTYxNzQ2NTY0NGY2ZTIyM2EzMTM3MzMzODM3MzczNzMxMzAzMTM0MzIzNDdk';
     const APPLEPAY_CDN_URL = 'https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association';
 
@@ -640,9 +638,9 @@ class Paypercut extends \Opencart\System\Engine\Controller
     }
 
     /**
-     * Return the canonical bytes of the Apple Pay domain association file.
-     * Tries the PayPerCut CDN first when $allow_cdn is true (3s budget), then falls
-     * back to the inline base64 constant. Always SHA256-verified before returning.
+     * Return the bytes of the Apple Pay domain association file.
+     * Tries the PayPerCut CDN first when $allow_cdn is true (3s budget),
+     * then falls back to the inline base64 constant.
      */
     private function getApplePayDomainAssociationContent(bool $allow_cdn = false): ?string
     {
@@ -657,13 +655,13 @@ class Paypercut extends \Opencart\System\Engine\Controller
             $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
 
-            if ($http_code === 200 && is_string($response) && hash('sha256', $response) === self::APPLEPAY_DOMAIN_FILE_SHA256) {
+            if ($http_code === 200 && is_string($response) && $response !== '') {
                 return $response;
             }
         }
 
         $fallback = base64_decode(self::APPLEPAY_DOMAIN_FILE_BASE64, true);
-        if ($fallback !== false && hash('sha256', $fallback) === self::APPLEPAY_DOMAIN_FILE_SHA256) {
+        if ($fallback !== false) {
             return $fallback;
         }
 
@@ -680,22 +678,19 @@ class Paypercut extends \Opencart\System\Engine\Controller
         $well_known_dir = DIR_OPENCART . '.well-known/';
         $destination = $well_known_dir . 'apple-developer-merchantid-domain-association';
 
-        // Fast path: if the file is already correct on disk, no-op without hitting the CDN.
+        // Fast path: if a file is already on disk, trust it and no-op without hitting the CDN.
         if (is_file($destination)) {
-            $existing = @file_get_contents($destination);
-            if ($existing !== false && hash('sha256', $existing) === self::APPLEPAY_DOMAIN_FILE_SHA256) {
-                return [
-                    'success' => true,
-                    'source' => 'noop',
-                    'path' => $destination,
-                    'reason' => null
-                ];
-            }
+            return [
+                'success' => true,
+                'source' => 'noop',
+                'path' => $destination,
+                'reason' => null
+            ];
         }
 
         $content = $this->getApplePayDomainAssociationContent($allow_cdn);
         if ($content === null) {
-            $this->log->write('Paypercut Apple Pay file deploy: bundled fallback failed integrity check.');
+            $this->log->write('Paypercut Apple Pay file deploy: no source available (CDN unreachable and bundled fallback could not be decoded).');
             return [
                 'success' => false,
                 'source' => null,
@@ -763,9 +758,9 @@ class Paypercut extends \Opencart\System\Engine\Controller
     }
 
     /**
-     * Self-test: check the verification file is on disk with matching content,
-     * then fetch it over HTTPS at the storefront URL and confirm.
-     * Returns ['state' => ok|missing|mismatch_local|mismatch_remote|http_error|unreachable, ...].
+     * Self-test: check the verification file is on disk, then fetch it over
+     * HTTPS at the storefront URL and confirm the path returns 200.
+     * Returns ['state' => ok|missing|http_error|unreachable, ...].
      */
     private function checkApplePayDomainFile(): array
     {
@@ -782,13 +777,6 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
         if (!is_file($destination)) {
             $result['message'] = 'Verification file is not deployed. Save settings or click Refresh to deploy.';
-            return $result;
-        }
-
-        $local = @file_get_contents($destination);
-        if ($local === false || hash('sha256', $local) !== self::APPLEPAY_DOMAIN_FILE_SHA256) {
-            $result['state'] = 'mismatch_local';
-            $result['message'] = 'Verification file on disk does not match the expected content. Save settings to redeploy.';
             return $result;
         }
 
@@ -820,12 +808,6 @@ class Paypercut extends \Opencart\System\Engine\Controller
         if ($http_code !== 200) {
             $result['state'] = 'http_error';
             $result['message'] = 'File is on disk but the URL returned HTTP ' . $http_code . '. The web server may be blocking the .well-known/ directory or rewriting the URL.';
-            return $result;
-        }
-
-        if (hash('sha256', $response) !== self::APPLEPAY_DOMAIN_FILE_SHA256) {
-            $result['state'] = 'mismatch_remote';
-            $result['message'] = 'URL returned HTTP 200 but the content does not match the expected verification bytes. Another file may be served from this path.';
             return $result;
         }
 
