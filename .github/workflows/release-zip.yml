@@ -30,6 +30,38 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "zip_name=$NAME" >> "$GITHUB_OUTPUT"
 
+      - name: Validate repo versions match tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, re, json
+          from pathlib import Path
+
+          tag_version = os.environ["VERSION"]
+          errors = []
+
+          data = json.loads(Path("install.json").read_text(encoding="utf-8"))
+          json_version = data.get("version", "not found")
+          if json_version != tag_version:
+              errors.append(f"install.json version is '{json_version}', expected '{tag_version}'")
+
+          content = Path("catalog/controller/extension/paypercut/payment/paypercut.php").read_text(encoding="utf-8")
+          m = re.search(r"private const PLUGIN_VERSION = '([^']*)'", content)
+          found = m.group(1) if m else "not found"
+          if found != tag_version:
+              errors.append(f"PLUGIN_VERSION is '{found}', expected '{tag_version}'")
+
+          if errors:
+              for e in errors:
+                  print(f"ERROR: {e}", flush=True)
+              raise SystemExit("Version mismatch — update repo files before tagging.")
+
+          print(f"OK: all version references match {tag_version}")
+          PY
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+
       - name: Sync install.json version to tag
         shell: bash
         run: |
