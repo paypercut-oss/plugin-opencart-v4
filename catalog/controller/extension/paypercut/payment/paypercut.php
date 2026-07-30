@@ -5,7 +5,7 @@ namespace Opencart\Catalog\Controller\Extension\Paypercut\Payment;
 
 class Paypercut extends \Opencart\System\Engine\Controller
 {
-    private const PLUGIN_VERSION = '1.0.4';
+    private const PLUGIN_VERSION = '1.0.5';
 
     public function index()
     {
