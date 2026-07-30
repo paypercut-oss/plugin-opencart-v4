@@ -5,6 +5,8 @@ namespace Opencart\Catalog\Controller\Extension\Paypercut\Payment;
 
 class Paypercut extends \Opencart\System\Engine\Controller
 {
+    private const PLUGIN_VERSION = '1.0.4';
+
     public function index()
     {
         $this->load->language('extension/paypercut/payment/paypercut');
@@ -1288,6 +1290,17 @@ class Paypercut extends \Opencart\System\Engine\Controller
             if ($locale) {
                 $payload['locale'] = $locale;
             }
+
+            // Platform metadata
+            $payload['metadata'] = array(
+                'platform'                     => 'opencart',
+                'platform_version'             => VERSION,
+                'plugin_version'               => self::PLUGIN_VERSION,
+                'php_version'                  => PHP_VERSION,
+                'site_url'                     => $this->config->get('config_url'),
+                'paypercut_checkout_mode'      => $ui_mode,
+                'paypercut_checkout_operation' => 'payment',
+            );
 
             // Make API request with timeout handling
             $ch = curl_init();
