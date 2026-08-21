@@ -152,6 +152,132 @@ class Paypercut extends \Opencart\System\Engine\Controller
         return array();
     }
 
+    /**
+     * Build the /v1/checkouts payload for the current order: line items with
+     * tax_rates_data, shipping via shipping_options, reconciled against the
+     * order total (matches the Magento/PrestaShop/OpenCart-v2/v3 Paypercut schema).
+     */
+    private function buildCheckoutData($order_id, $order_info)
+    {
+        $currency_code = $order_info['currency_code'];
+        $currency_value = $order_info['currency_value'];
+
+        $total_amount = (int)round(
+            $this->currency->format($order_info['total'], $currency_code, $currency_value, false) * 100
+        );
+
+        $products = $this->model_checkout_order->getProducts($order_id);
+        $line_items = array();
+        $line_items_total = 0;
+
+        foreach ($products as $product) {
+            $quantity = (int)$product['quantity'];
+            $unit_price_excl = (float)$this->currency->format($product['price'], $currency_code, $currency_value, false);
+            $unit_tax = (float)$this->currency->format($product['tax'], $currency_code, $currency_value, false);
+
+            $tax_rate_data = null;
+            $unit_amount = (int)round($unit_price_excl * 100);
+
+            if ($unit_price_excl > 0 && $unit_tax > 0) {
+                $tax_percentage = ($unit_tax / $unit_price_excl) * 100;
+
+                if ($tax_percentage <= 100) {
+                    $unit_amount = (int)round(($unit_price_excl + $unit_tax) * 100);
+                    $tax_rate_data = array(
+                        'display_name' => 'Tax',
+                        'percentage' => number_format($tax_percentage, 2, '.', ''),
+                        'inclusive' => true
+                    );
+                }
+            }
+
+            $line_item = array(
+                'quantity' => $quantity,
+                'price_data' => array(
+                    'currency' => $currency_code,
+                    'unit_amount' => $unit_amount,
+                    'type' => 'one_time',
+                    'tax_behavior' => $tax_rate_data === null ? 'unspecified' : 'inclusive',
+                    'product_data' => array('name' => $product['name'])
+                )
+            );
+
+            if ($tax_rate_data !== null) {
+                $line_item['tax_rates_data'] = array($tax_rate_data);
+            }
+
+            $line_items[] = $line_item;
+            $line_items_total += $unit_amount * $quantity;
+        }
+
+        $shipping_options = array();
+        $shipping_amount = 0;
+
+        $order_totals = $this->model_checkout_order->getTotals($order_id);
+        foreach ($order_totals as $total) {
+            if ($total['code'] === 'shipping' && (float)$total['value'] > 0) {
+                $shipping_amount = (int)round(
+                    $this->currency->format($total['value'], $currency_code, $currency_value, false) * 100
+                );
+
+                if ($shipping_amount > 0) {
+                    $shipping_options[] = array(
+                        'shipping_rate_data' => array(
+                            'display_name' => $total['title'],
+                            'type' => 'fixed_amount',
+                            'fixed_amount' => array(
+                                'amount' => $shipping_amount,
+                                'currency' => $currency_code
+                            ),
+                            'tax_behavior' => 'inclusive'
+                        )
+                    );
+                }
+                break;
+            }
+        }
+
+        $line_items_delta = $total_amount - $shipping_amount - $line_items_total;
+
+        if ($line_items_delta > 0) {
+            $line_items[] = array(
+                'quantity' => 1,
+                'price_data' => array(
+                    'currency' => $currency_code,
+                    'unit_amount' => $line_items_delta,
+                    'type' => 'one_time',
+                    'product_data' => array('name' => 'Order adjustment')
+                )
+            );
+        } elseif ($line_items_delta < 0) {
+            $line_items = array();
+            $shipping_options = array();
+        }
+
+        $data = array(
+            'amount' => $total_amount,
+            'currency' => $currency_code,
+            'order_id' => $order_id,
+            'return_url' => $this->url->link('extension/paypercut/payment/paypercut|callback', 'order_id=' . $order_id, true),
+            'cancel_url' => $this->url->link('checkout/checkout', '', true),
+            'customer' => array(
+                'email' => $order_info['email'],
+                'firstname' => $order_info['firstname'],
+                'lastname' => $order_info['lastname']
+            )
+        );
+
+        if (!empty($line_items)) {
+            $data['line_items'] = $line_items;
+        }
+
+        if (!empty($shipping_options)) {
+            $data['shipping_options'] = $shipping_options;
+        }
+
+        return $data;
+    }
+
     private function createCheckoutSession()
     {
         // Load the order
@@ -168,32 +294,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
             throw new \Exception('Order not found');
         }
 
-        // Get cart products for line items
-        $line_items = array();
-
-        foreach ($this->cart->getProducts() as $product) {
-            $line_items[] = array(
-                'name' => $product['name'],
-                'quantity' => (int)$product['quantity'],
-                'unit_amount' => (int)round($this->tax->calculate($product['price'], $product['tax_class_id'], $this->config->get('config_tax')) * 100),
-                'currency' => $order_info['currency_code']
-            );
-        }
-
-        // Prepare payment data
-        $data = array(
-            'amount' => $this->currency->format($order_info['total'], $order_info['currency_code'], false, false),
-            'currency' => $order_info['currency_code'],
-            'order_id' => $order_id,
-            'return_url' => $this->url->link('extension/paypercut/payment/paypercut|callback', 'order_id=' . $order_id, true),
-            'cancel_url' => $this->url->link('checkout/checkout', '', true),
-            'customer' => array(
-                'email' => $order_info['email'],
-                'firstname' => $order_info['firstname'],
-                'lastname' => $order_info['lastname']
-            ),
-            'line_items' => $line_items
-        );
+        $data = $this->buildCheckoutData($order_id, $order_info);
 
         // Make API call to Paypercut
         return $this->sendPaymentRequest($data);
@@ -220,32 +321,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
                 throw new \Exception($this->language->get('error_order'));
             }
 
-            // Get cart products for line items
-            $line_items = array();
-
-            foreach ($this->cart->getProducts() as $product) {
-                $line_items[] = array(
-                    'name' => $product['name'],
-                    'quantity' => (int)$product['quantity'],
-                    'unit_amount' => (int)round($this->tax->calculate($product['price'], $product['tax_class_id'], $this->config->get('config_tax')) * 100),
-                    'currency' => $order_info['currency_code']
-                );
-            }
-
-            // Prepare payment data
-            $data = array(
-                'amount' => $this->currency->format($order_info['total'], $order_info['currency_code'], false, false),
-                'currency' => $order_info['currency_code'],
-                'order_id' => $order_id,
-                'return_url' => $this->url->link('extension/paypercut/payment/paypercut|callback', 'order_id=' . $order_id, true),
-                'cancel_url' => $this->url->link('checkout/checkout', '', true),
-                'customer' => array(
-                    'email' => $order_info['email'],
-                    'firstname' => $order_info['firstname'],
-                    'lastname' => $order_info['lastname']
-                ),
-                'line_items' => $line_items
-            );
+            $data = $this->buildCheckoutData($order_id, $order_info);
 
             // Make API call to Paypercut
             $response = $this->sendPaymentRequest($data);
@@ -1231,9 +1307,8 @@ class Paypercut extends \Opencart\System\Engine\Controller
             $ui_mode = $checkout_mode === 'embedded' ? 'embedded' : 'hosted';
 
             // Prepare request payload
-            // Use round() before casting to int to avoid floating-point precision issues
-            // e.g., 132.20 * 100 = 13219.999... which truncates to 13219 without rounding
-            $amount_in_cents = (int)round($data['amount'] * 100);
+            // $data['amount'] is already in the smallest currency unit (cents) — see buildCheckoutData()
+            $amount_in_cents = (int)$data['amount'];
 
             $payload = array(
                 'amount' => $amount_in_cents,
@@ -1283,6 +1358,11 @@ class Paypercut extends \Opencart\System\Engine\Controller
             // Add line items if provided
             if (!empty($data['line_items'])) {
                 $payload['line_items'] = $data['line_items'];
+            }
+
+            // Add shipping options if provided
+            if (!empty($data['shipping_options'])) {
+                $payload['shipping_options'] = $data['shipping_options'];
             }
 
             // Add locale if supported
