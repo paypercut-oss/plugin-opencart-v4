@@ -2,12 +2,25 @@
 
 namespace Opencart\Admin\Controller\Extension\Paypercut\Payment;
 
+require_once __DIR__ . '/../../../helper/currency.php';
+
 /**
  * Paypercut Order Management Controller
  * Handles refunds and displays payment information in order view
  */
 class PaypercutOrder extends \Opencart\System\Engine\Controller
 {
+    private function toMinorUnits(string $amount, string $currency_code): int
+    {
+        // OpenCart already knows each currency's decimal places (admin-configurable
+        // under Localisation > Currencies) — use that instead of a hardcoded list.
+        return paypercut_to_minor_units($amount, (int)$this->currency->getDecimalPlace($currency_code));
+    }
+
+    private function fromMinorUnits(int $amount, string $currency_code): string
+    {
+        return paypercut_from_minor_units($amount, (int)$this->currency->getDecimalPlace($currency_code));
+    }
 
     /**
      * Display Paypercut payment details in order view
@@ -237,7 +250,7 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
 
         $payload = [
             'payment' => $payment_id,
-            'amount' => (int)($amount * 100), // Convert to minor units
+            'amount' => $this->toMinorUnits((string)$amount, $currency),
             'currency' => strtoupper($currency)
         ];
 
@@ -279,11 +292,13 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
         $result = json_decode($response, true);
 
         if ($http_code == 201 || $http_code == 200) {
+            $result_currency = $result['currency']['iso'] ?? $currency;
+
             return [
                 'refund_id' => $result['id'],
                 'status' => $result['status'],
-                'amount' => $result['amount'] / 100,
-                'currency' => $result['currency']['iso'] ?? $currency
+                'amount' => $this->fromMinorUnits((int)$result['amount'], $result_currency),
+                'currency' => $result_currency
             ];
         }
 
@@ -419,12 +434,13 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
                     $json['payment'] = $payment;
 
                     // Calculate fees and net amount
-                    $json['amount'] = $payment['amount'] / 100; // Convert from cents
-                    $json['currency'] = $payment['currency'];
+                    $payment_currency = $payment['currency'];
+                    $json['amount'] = $this->fromMinorUnits((int)$payment['amount'], $payment_currency);
+                    $json['currency'] = $payment_currency;
 
                     if (isset($payment['fees'])) {
-                        $json['fees'] = $payment['fees'] / 100;
-                        $json['net_amount'] = ($payment['amount'] - $payment['fees']) / 100;
+                        $json['fees'] = $this->fromMinorUnits((int)$payment['fees'], $payment_currency);
+                        $json['net_amount'] = $this->fromMinorUnits((int)$payment['amount'] - (int)$payment['fees'], $payment_currency);
                     }
 
                     // 3DS authentication details
@@ -490,7 +506,7 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
 
                 $payload = [];
                 if ($capture_amount > 0 && $capture_amount < $transaction['amount']) {
-                    $payload['amount'] = (int)($capture_amount * 100); // Convert to cents
+                    $payload['amount'] = $this->toMinorUnits((string)$capture_amount, $transaction['currency']);
                 }
 
                 $ch = curl_init();

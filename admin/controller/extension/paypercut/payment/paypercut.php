@@ -2,9 +2,23 @@
 
 namespace Opencart\Admin\Controller\Extension\Paypercut\Payment;
 
+require_once __DIR__ . '/../../../helper/currency.php';
+
 class Paypercut extends \Opencart\System\Engine\Controller
 {
     private array $error = [];
+
+    private function toMinorUnits(string $amount, string $currency_code): int
+    {
+        // OpenCart already knows each currency's decimal places (admin-configurable
+        // under Localisation > Currencies) — use that instead of a hardcoded list.
+        return paypercut_to_minor_units($amount, (int)$this->currency->getDecimalPlace($currency_code));
+    }
+
+    private function fromMinorUnits(int $amount, string $currency_code): string
+    {
+        return paypercut_from_minor_units($amount, (int)$this->currency->getDecimalPlace($currency_code));
+    }
 
     // Apple Pay domain verification file — see https://docs.paypercut.io/docs/accept-payments/apple-pay
     const APPLEPAY_DOMAIN_FILE_BASE64 = 'N2IyMjc2NjU3MjczNjk2ZjZlMjIzYTMxMmMyMjcwNzM3MDQ5NjQyMjNhMjIzMjM1NDQ0NTQ0MzE0NDM1NDQzMzM4NDM0NjQ2NDY0NTM3MzczODM1NDMzMTMxMzI0MzMxMzYzOTQxMzYzNzMxMzczMDM4MzgzNjQyNDYzOTQzNDQzNTM4MzE0NTM3NDY0MjM4MzY0MjQ2NDUzMjM5MzQzMDM3MzMzNzQ0MzkzMTIyMmMyMjYzNzI2NTYxNzQ2NTY0NGY2ZTIyM2EzMTM3MzMzODM3MzczNzMxMzAzMTM0MzIzNDdk';
@@ -1181,7 +1195,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
         $payload = [
             'payment' => $payment_id,
-            'amount' => (int)($amount * 100),
+            'amount' => $this->toMinorUnits((string)$amount, $currency),
             'currency' => strtoupper($currency)
         ];
 
@@ -1217,11 +1231,13 @@ class Paypercut extends \Opencart\System\Engine\Controller
         $result = json_decode($response, true);
 
         if ($http_code == 201 || $http_code == 200) {
+            $result_currency = $result['currency']['iso'] ?? $currency;
+
             return [
                 'refund_id' => $result['id'],
                 'status' => $result['status'],
-                'amount' => $result['amount'] / 100,
-                'currency' => $result['currency']['iso'] ?? $currency
+                'amount' => $this->fromMinorUnits((int)$result['amount'], $result_currency),
+                'currency' => $result_currency
             ];
         }
 
