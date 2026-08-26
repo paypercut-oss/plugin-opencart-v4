@@ -15,6 +15,10 @@
 
 $root = dirname(__DIR__);
 
+require_once $root . '/system/library/paypercut/bootstrap.php';
+
+\Paypercut\Bootstrap::load();
+
 $documented = file_get_contents($root . '/docs/telemetry.md');
 
 /** Emitted by the library rather than by a call site. */
@@ -62,6 +66,13 @@ sort($names);
 foreach ($names as $name) {
     if (strpos($documented, '`' . $name . '`') === false) {
         echo "FAIL  " . $name . " is emitted but not documented in docs/telemetry.md\n";
+        $failures++;
+    }
+
+    // The gate screens the whole envelope, the event name included, so a name
+    // that trips the deny patterns would silently bin its own event.
+    if (\Paypercut\Telemetry\Event::isDenied(['event' => $name])) {
+        echo "FAIL  " . $name . " trips the deny assertion\n";
         $failures++;
     }
 }

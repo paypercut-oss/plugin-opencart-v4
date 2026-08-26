@@ -54,15 +54,22 @@ A merchant-started, self-expiring diagnostic feed, off by default, on the
 module's **Debug Session** tab. Design, storage, budgets, the privacy contract
 and the full event catalogue: [`docs/telemetry.md`](docs/telemetry.md).
 
-Two things not to change without reading that document first:
+Four things not to change without reading that document first:
 
 - **The environment pairing.** The mint host and the edge host come from one
-  setting, in one call sequence. A token minted for one environment is refused
-  by every other environment's edge with a 401 that looks exactly like a forgery.
-- **The deny assertion.** `EventQueue::append()` screens every envelope and
-  drops the **whole event** — never just the offending field — and
-  `Event::apiFailure()` never sends the upstream error message, because the API
-  quotes a rejected key back inside it.
+  setting, in one call sequence, with no override. A token minted for one
+  environment is refused by every other environment's edge with a 401 that
+  looks exactly like a forgery.
+- **The deny assertion.** `EventQueue::append()` screens the **whole envelope**
+  as it will be serialised — correlation ids included, because those are copied
+  out of webhook bodies — and drops the **whole event**, never just the
+  offending field.
+- **Upstream text.** Neither `Event::apiFailure()` nor `Event::failure()` sends
+  an upstream error message: the API quotes a rejected key back inside it, and
+  OpenCart's database adapter puts the SQL and the database user@host inside it.
+- **The constructor boot.** Every reporting controller loads the telemetry
+  library in its constructor. Nothing autoloads that namespace, and PHP
+  evaluates an `Event::...` argument before `report()` is entered.
 
 ## Tables
 
