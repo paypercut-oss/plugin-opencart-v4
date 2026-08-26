@@ -10,10 +10,24 @@ class Paypercut extends \Opencart\System\Engine\Controller
     const APPLEPAY_DOMAIN_FILE_BASE64 = 'N2IyMjc2NjU3MjczNjk2ZjZlMjIzYTMxMmMyMjcwNzM3MDQ5NjQyMjNhMjIzMjM1NDQ0NTQ0MzE0NDM1NDQzMzM4NDM0NjQ2NDY0NTM3MzczODM1NDMzMTMxMzI0MzMxMzYzOTQxMzYzNzMxMzczMDM4MzgzNjQyNDYzOTQzNDQzNTM4MzE0NTM3NDY0MjM4MzY0MjQ2NDUzMjM5MzQzMDM3MzMzNzQ0MzkzMTIyMmMyMjYzNzI2NTYxNzQ2NTY0NGY2ZTIyM2EzMTM3MzMzODM3MzczNzMxMzAzMTM0MzIzNDdk';
     const APPLEPAY_CDN_URL = 'https://cdn.paypercut.io/.well-known/apple-developer-merchantid-domain-association';
 
+    /**
+     * Load the telemetry library before any method body runs.
+     *
+     * PHP evaluates a \Paypercut\Telemetry\Event::... argument BEFORE
+     * entering report(), so booting inside report() is too late: an entry point
+     * that reports before its first API call raises an uncaught Error that no
+     * catch (\Exception) rescues — on an AJAX refund route, and on the
+     * shopper's return-from-payment path.
+     */
+    public function __construct(\Opencart\System\Engine\Registry $registry)
+    {
+        parent::__construct($registry);
+
+        $this->bootTelemetry();
+    }
+
     public function index(): void
     {
-        $this->bootTelemetry();
-
         $this->load->language('extension/paypercut/payment/paypercut');
 
         $this->document->setTitle($this->language->get('heading_title'));
@@ -1356,8 +1370,6 @@ class Paypercut extends \Opencart\System\Engine\Controller
      */
     public function install(): void
     {
-        $this->bootTelemetry();
-
         // Telemetry's own key-value table (token, queue, runtime counters, locks)
         \Paypercut\Telemetry\Store::install();
 
@@ -1482,8 +1494,6 @@ class Paypercut extends \Opencart\System\Engine\Controller
      */
     public function uninstall(): void
     {
-        $this->bootTelemetry();
-
         // end() is the single teardown path, so uninstalling destroys the token
         // and both buffers before the table holding them is dropped.
         \Paypercut\Telemetry\TelemetrySession::end('uninstalled');
@@ -1508,8 +1518,6 @@ class Paypercut extends \Opencart\System\Engine\Controller
      */
     private function apiUrl(string $path): string
     {
-        $this->bootTelemetry();
-
         return \Paypercut\Environment::apiBaseUri($this->config->get('payment_paypercut_environment')) . ltrim($path, '/');
     }
 
@@ -1539,8 +1547,6 @@ class Paypercut extends \Opencart\System\Engine\Controller
      */
     private function syncTelemetryWithSettings(array $previous): void
     {
-        $this->bootTelemetry();
-
         // The in-request config still holds what this request started with.
         foreach ($this->request->post as $key => $value) {
             if (strpos((string)$key, 'payment_paypercut_') === 0) {
@@ -1577,8 +1583,6 @@ class Paypercut extends \Opencart\System\Engine\Controller
      */
     private function report(\Paypercut\Telemetry\Event $event): void
     {
-        $this->bootTelemetry();
-
         \Paypercut\Telemetry\EventRecorder::record($event);
     }
 }

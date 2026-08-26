@@ -7,10 +7,23 @@ class Paypercut extends \Opencart\System\Engine\Controller
 {
     private const PLUGIN_VERSION = '1.0.5';
 
+    /**
+     * Load the telemetry library before any method body runs.
+     *
+     * PHP evaluates a \Paypercut\Telemetry\Event::... argument BEFORE
+     * entering report(), so booting inside report() is too late: an entry point
+     * that reports before its first API call raises an uncaught Error that no
+     * catch (\Exception) rescues, on the shopper's return-from-payment path.
+     */
+    public function __construct(\Opencart\System\Engine\Registry $registry)
+    {
+        parent::__construct($registry);
+
+        $this->bootTelemetry();
+    }
+
     public function index()
     {
-        $this->bootTelemetry();
-
         $this->load->language('extension/paypercut/payment/paypercut');
 
         $data['button_confirm'] = $this->language->get('button_confirm');
@@ -935,8 +948,6 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
     public function webhook()
     {
-        $this->bootTelemetry();
-
         // Get the raw POST data
         $payload = file_get_contents('php://input');
         $signature = isset($_SERVER['HTTP_X_PAYPERCUT_SIGNATURE']) ? $_SERVER['HTTP_X_PAYPERCUT_SIGNATURE'] : '';
@@ -2055,8 +2066,6 @@ class Paypercut extends \Opencart\System\Engine\Controller
      */
     private function apiUrl(string $path): string
     {
-        $this->bootTelemetry();
-
         return \Paypercut\Environment::apiBaseUri($this->config->get('payment_paypercut_environment')) . ltrim($path, '/');
     }
 
@@ -2076,8 +2085,6 @@ class Paypercut extends \Opencart\System\Engine\Controller
      */
     private function report(\Paypercut\Telemetry\Event $event): void
     {
-        $this->bootTelemetry();
-
         \Paypercut\Telemetry\EventRecorder::record($event);
     }
 }

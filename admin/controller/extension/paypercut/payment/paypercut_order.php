@@ -10,6 +10,22 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
 {
 
     /**
+     * Load the telemetry library before any method body runs.
+     *
+     * PHP evaluates a \Paypercut\Telemetry\Event::... argument BEFORE
+     * entering report(), so booting inside report() is too late: an entry point
+     * that reports before its first API call raises an uncaught Error that no
+     * catch (\Exception) rescues — on an AJAX refund route, and on the
+     * shopper's return-from-payment path.
+     */
+    public function __construct(\Opencart\System\Engine\Registry $registry)
+    {
+        parent::__construct($registry);
+
+        $this->bootTelemetry();
+    }
+
+    /**
      * Display Paypercut payment details in order view
      */
     public function info(): string
@@ -727,8 +743,6 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
      */
     private function apiUrl(string $path): string
     {
-        $this->bootTelemetry();
-
         return \Paypercut\Environment::apiBaseUri($this->config->get('payment_paypercut_environment')) . ltrim($path, '/');
     }
 
@@ -751,8 +765,6 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
      */
     private function report(\Paypercut\Telemetry\Event $event): void
     {
-        $this->bootTelemetry();
-
         \Paypercut\Telemetry\EventRecorder::record($event);
     }
 }

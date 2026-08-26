@@ -62,6 +62,13 @@ Everything lives under `system/library/paypercut/`, loaded by explicit
 extension's namespaces are only registered while an extension list page renders,
 so a storefront or webhook request cannot rely on them.
 
+Because nothing autoloads, **every controller that reports boots the library in
+its constructor**, not in `report()`. PHP evaluates a
+`\Paypercut\Telemetry\Event::...` argument before entering `report()`, so a
+guard that reports before the request's first API call would raise an uncaught
+`Error` that no `catch (\Exception)` rescues — a PHP 500 where the shopper used
+to get a redirect to the failure page.
+
 ## Storage
 
 | Need | Where |
