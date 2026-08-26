@@ -235,6 +235,49 @@ check('an API failure carries the status', $envelope['attrs']['http_status'], 40
 $mine = Event::failure('checkout.order_missing', 'order_not_found')->because('Order 178 had no Paypercut session');
 check('an authored message survives', $mine->envelope(1)['error']['message'], 'Order 178 had no Paypercut session');
 
+// OpenCart's database adapter puts the whole statement, and the database
+// user@host, inside the exception message. None of it may reach the wire.
+$sql = new \Exception("Error: Duplicate entry 'x' for key 'paypercut_id'<br/>Error No: 1062<br/> SELECT * FROM `oc_paypercut_customer` WHERE email = 'shopper@example.com'");
+$thrown = Event::failure('checkout.hosted.create_failed', 'session_create', array(), $sql)->envelope(1);
+
+check('an exception message never travels', isset($thrown['error']['message']), false);
+check('the exception type still travels', $thrown['error']['type'], 'Exception');
+check('the exception code still travels', $thrown['error']['code'], 'session_create');
+
+$uncaught_sql = Event::fatal(
+    "Uncaught mysqli_sql_exception: Error: Duplicate entry 'x'<br/>Error No: 1062<br/> SELECT * FROM `oc_paypercut_customer` WHERE email = 'shopper@example.com' in " . DIR_SYSTEM . "library/db/mysqli.php:122\nStack trace:\n#0 {main}",
+    DIR_SYSTEM . 'library/db/mysqli.php',
+    122,
+    E_ERROR
+)->envelope(1);
+
+check('an uncaught exception message never travels', isset($uncaught_sql['error']['message']), false);
+check('an uncaught exception is still named', $uncaught_sql['error']['type'], 'mysqli_sql_exception');
+check('a fatal still reports where it died', $uncaught_sql['error']['stack'], ['library/db/mysqli.php:122']);
+
+$engine = Event::fatal(
+    'Uncaught Error: Call to a member function getId() on null in ' . DIR_CATALOG . "controller/x.php:12\nStack trace:\n#0 {main}",
+    DIR_CATALOG . 'controller/x.php',
+    12,
+    E_ERROR
+)->envelope(1);
+
+check('PHP\'s own fatal text survives', $engine['error']['message'], 'Call to a member function getId() on null in controller/x.php:12');
+check('an engine fatal is typed', $engine['error']['type'], 'Error');
+
+$argument = Event::fatal(
+    'Uncaught TypeError: total(): Argument #1 ($amount) must be of type int, string given, called in ' . DIR_CATALOG . 'controller/x.php on line 9',
+    DIR_CATALOG . 'controller/x.php',
+    9,
+    E_ERROR
+)->envelope(1);
+
+check('the "called in" tail comes off a fatal', $argument['error']['message'], 'total(): Argument #1 ($amount) must be of type int, string given');
+
+$triggered = Event::fatal('Order for jane@example.com could not be saved', DIR_CATALOG . 'controller/x.php', 4, E_USER_ERROR)->envelope(1);
+
+check('trigger_error prose never travels', isset($triggered['error']['message']), false);
+
 /* ---------------------------------------------------------- string bounding */
 
 check('control characters are stripped', Event::text("a\x00b\x1Fc"), 'abc');

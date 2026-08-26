@@ -184,11 +184,25 @@ refund reason text, customer names, email addresses, billing and shipping
 addresses, order totals, line items, absolute filesystem paths, the admin user
 id of whoever started the session, and upstream API prose.
 
-That last one is the rule most easily lost in a port. **The Paypercut API quotes
-submitted input back** — a rejected key appears inside the error message — so
-`Event::apiFailure()` always drops `error.message` and carries the diagnosis in
-`api_code` / `api_param` / `trace_id` / `error.type` instead. A message the
-module authored itself is the diagnosis and stays.
+That last one is the rule most easily lost in a port, and it is not only the
+API's prose. **The Paypercut API quotes submitted input back** — a rejected key
+appears inside the error message — so `Event::apiFailure()` always drops
+`error.message` and carries the diagnosis in `api_code` / `api_param` /
+`trace_id` / `error.type` instead. **OpenCart's own database adapter is worse**:
+it puts the full SQL statement, and the database `user@host`, inside the
+exception message, and the SQL on the checkout path contains the shopper's email
+address. So `Event::failure()` never quotes an exception's message either —
+`error.type`, `error.code` and the scrubbed stack carry the diagnosis.
+
+`Event::fatal()` applies the same rule to `error_get_last()`. PHP's own fatal
+text is quoted (`Call to a member function getId() on null`); the message of an
+uncaught throwable is quoted only for the engine's global error classes
+(`Error`, `TypeError`, `ArgumentCountError`, `ArithmeticError`,
+`DivisionByZeroError`, `ParseError`), never for an `\Exception` and never for
+`trigger_error()` prose. The throwable is still named in `error.type`.
+
+A message the module authored itself is the diagnosis and stays: that is what
+`->because('confirm threw ' . Event::shortClassName($e))` is for.
 
 `EventQueue::append()` is the last gate. It screens the **whole envelope as it
 will be serialised** — `attrs`, `error` (including `error.stack`) and the

@@ -32,6 +32,22 @@ final class Event
     const MAX_STACK_FRAMES = 8;
 
     /**
+     * Uncaught throwables whose message PHP itself wrote.
+     *
+     * Everything else — every \Exception, and ValueError and
+     * UnhandledMatchError, which quote the offending value — carries an
+     * author's prose, which on this path means SQL, hostnames and shopper data.
+     */
+    const ENGINE_ERROR_TYPES = [
+        'ArgumentCountError',
+        'ArithmeticError',
+        'DivisionByZeroError',
+        'Error',
+        'ParseError',
+        'TypeError'
+    ];
+
+    /**
      * Shortest run of a credential that still counts as that credential.
      *
      * text() clamps before this assertion ever runs, so a secret at the end of
@@ -120,6 +136,11 @@ final class Event
 
     /**
      * Report a failure, under whichever event name describes where it happened.
+     *
+     * The exception's message never travels. OpenCart's database adapter puts
+     * the full SQL statement — and the database user@host — inside it, so the
+     * type, the code and the scrubbed stack carry the diagnosis instead, and a
+     * call site with prose of its own says so with because().
      */
     public static function failure(string $name, string $code, array $attrs = [], ?\Throwable $exception = null): self
     {
@@ -129,7 +150,6 @@ final class Event
 
         if ($exception !== null) {
             $event->error['type'] = self::shortClassName($exception);
-            $event->error['message'] = self::text($exception->getMessage());
             $event->error['stack'] = self::stack($exception);
 
             $event->fields += self::origin(self::frameFiles($exception));
@@ -190,11 +210,16 @@ final class Event
         $event->fields += self::origin([$file]);
 
         $event->error = [
-            'code'    => 'php_fatal',
-            'type'    => 'FatalError',
-            'message' => self::text(self::fatalMessage($message)),
-            'stack'   => [self::relativePath($file) . ':' . $line]
+            'code'  => 'php_fatal',
+            'type'  => self::fatalType($message),
+            'stack' => [self::relativePath($file) . ':' . $line]
         ];
+
+        $quotable = self::fatalMessage($message, $level);
+
+        if ($quotable !== '') {
+            $event->error['message'] = self::text($quotable);
+        }
 
         return $event;
     }
@@ -656,18 +681,54 @@ final class Event
     }
 
     /**
-     * Reduce PHP's fatal message to the part that is not already reported.
-     *
-     * An uncaught Error arrives with its whole stack trace inlined and every
-     * path absolute. Left alone it spends the clamp on frames the stack field
-     * already carries, and puts the server's filesystem layout on the wire.
+     * Name the throwable that ended the request, when the message says.
      */
-    private static function fatalMessage(string $message): string
+    private static function fatalType(string $message): string
     {
+        if (!preg_match('/\AUncaught ([A-Za-z_\\\\][A-Za-z0-9_\\\\]*)\s*:/', $message, $matches)) {
+            return 'FatalError';
+        }
+
+        $parts = explode('\\', $matches[1]);
+
+        return self::identifier((string)end($parts)) ?: 'FatalError';
+    }
+
+    /**
+     * The part of PHP's fatal message that is PHP's own words, or ''.
+     *
+     * An uncaught throwable's message belongs to whoever raised it, and on this
+     * path that is a database adapter quoting the SQL it just ran. Only the
+     * engine's own text is quotable, and only after the trace, the "called in"
+     * tail and the absolute paths — all reported elsewhere — come off it.
+     */
+    private static function fatalMessage(string $message, int $level): string
+    {
+        // trigger_error() text is a third-party author's prose, not PHP's.
+        if ($level === E_USER_ERROR) {
+            return '';
+        }
+
         $trace = strpos($message, 'Stack trace:');
 
         if ($trace !== false) {
             $message = rtrim(substr($message, 0, $trace));
+        }
+
+        $called = strpos($message, ', called in ');
+
+        if ($called !== false) {
+            $message = substr($message, 0, $called);
+        }
+
+        if (preg_match('/\AUncaught ([A-Za-z_\\\\][A-Za-z0-9_\\\\]*)\s*:\s*(.*)\z/s', $message, $matches)) {
+            // Engine throwables are global; a namespaced one of the same short
+            // name belongs to whoever declared it, and so does its message.
+            if (strpos($matches[1], '\\') !== false || !in_array($matches[1], self::ENGINE_ERROR_TYPES, true)) {
+                return '';
+            }
+
+            $message = $matches[2];
         }
 
         foreach (['DIR_EXTENSION', 'DIR_APPLICATION', 'DIR_CATALOG', 'DIR_SYSTEM', 'DIR_OPENCART'] as $root) {
