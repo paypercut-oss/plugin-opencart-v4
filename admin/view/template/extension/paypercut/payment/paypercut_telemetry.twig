@@ -109,6 +109,10 @@
   </div>
 </div>
 
+{# OpenCart runs Twig with autoescape off, so json_encode is the only escaping
+   this block gets, and its default flags leave < > & literal — enough for a
+   value to steer the HTML parser out of the script element. #}
+{% set js = constant('JSON_HEX_TAG') b-or constant('JSON_HEX_AMP') b-or constant('JSON_HEX_APOS') b-or constant('JSON_HEX_QUOT') %}
 <script type="text/javascript">
 /**
  * Debug session panel: the consent modal, the live countdown, and a poll that
@@ -126,7 +130,7 @@
     var modal = document.getElementById('paypercut-debug-session-modal');
     var statusBox = document.getElementById('paypercut-debug-session-status');
     var base = 'index.php?route=extension/paypercut/payment/paypercut_telemetry';
-    var userToken = {{ user_token|json_encode|raw }};
+    var userToken = {{ user_token|json_encode(js)|raw }};
     var pollSeconds = {{ poll_seconds }};
 
     var pollTimer = null;
@@ -135,14 +139,14 @@
     var deadlineConfirmed = false;
     var pollFailures = 0;
     var state = {
-        state: {{ state|json_encode|raw }},
-        session_id: {{ session_id|json_encode|raw }},
+        state: {{ state|json_encode(js)|raw }},
+        session_id: {{ session_id|json_encode(js)|raw }},
         expires_at: {{ expires_at }},
         events_sent: {{ events_sent }},
         events_dropped: {{ events_dropped }},
-        started_by_name: {{ started_by_name|json_encode|raw }},
-        message: {{ message|json_encode|raw }},
-        trace_id: {{ trace_id|json_encode|raw }}
+        started_by_name: {{ started_by_name|json_encode(js)|raw }},
+        message: {{ message|json_encode(js)|raw }},
+        trace_id: {{ trace_id|json_encode(js)|raw }}
     };
     // Offset between this browser's clock and the server's, so a wrong local
     // clock cannot make the countdown disagree with when the session ends.
@@ -269,7 +273,7 @@
         }
 
         if (ended) {
-            show({{ text_debug_session_ended|json_encode|raw }}, 'success');
+            show({{ text_debug_session_ended|json_encode(js)|raw }}, 'success');
         }
     }
 
@@ -316,7 +320,7 @@
                 if (pollFailures >= 3) {
                     stopPolling();
                     stopTicking();
-                    show({{ text_debug_admin_unreachable|json_encode|raw }}, 'error');
+                    show({{ text_debug_admin_unreachable|json_encode(js)|raw }}, 'error');
 
                     return;
                 }
@@ -394,7 +398,7 @@
 
         var confirmCopy = function () {
             var original = button.textContent;
-            button.textContent = {{ text_debug_copied|json_encode|raw }};
+            button.textContent = {{ text_debug_copied|json_encode(js)|raw }};
             window.setTimeout(function () {
                 button.textContent = original;
             }, 2000);
@@ -442,7 +446,7 @@
                 stopButton.disabled = false;
 
                 if (error) {
-                    show({{ text_debug_network_error|json_encode|raw }}, 'error');
+                    show({{ text_debug_network_error|json_encode(js)|raw }}, 'error');
 
                     return;
                 }
@@ -488,7 +492,7 @@
                 closeModal();
 
                 if (error) {
-                    show({{ text_debug_network_error|json_encode|raw }}, 'error');
+                    show({{ text_debug_network_error|json_encode(js)|raw }}, 'error');
 
                     return;
                 }
