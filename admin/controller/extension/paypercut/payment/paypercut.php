@@ -12,6 +12,8 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
     public function index(): void
     {
+        $this->bootTelemetry();
+
         $this->load->language('extension/paypercut/payment/paypercut');
 
         $this->document->setTitle($this->language->get('heading_title'));
@@ -19,7 +21,14 @@ class Paypercut extends \Opencart\System\Engine\Controller
         $this->load->model('setting/setting');
 
         if (($this->request->server['REQUEST_METHOD'] == 'POST') && $this->validate()) {
+            $connection = [
+                'api_key'     => (string)$this->config->get('payment_paypercut_api_key'),
+                'environment' => (string)$this->config->get('payment_paypercut_environment')
+            ];
+
             $this->model_setting_setting->editSetting('payment_paypercut', $this->request->post);
+
+            $this->syncTelemetryWithSettings($connection);
 
             $this->session->data['success'] = $this->language->get('text_success');
 
@@ -72,6 +81,17 @@ class Paypercut extends \Opencart\System\Engine\Controller
         // Detect test/live mode from API key
         $api_key = isset($this->request->post['payment_paypercut_api_key']) ? $this->request->post['payment_paypercut_api_key'] : $this->config->get('payment_paypercut_api_key');
         $data['payment_paypercut_mode'] = $this->detectApiKeyMode($api_key);
+
+        // Paypercut environment. Both the API host and the telemetry edge host
+        // are derived from this one value.
+        if (isset($this->request->post['payment_paypercut_environment'])) {
+            $data['payment_paypercut_environment'] = $this->request->post['payment_paypercut_environment'];
+        } else {
+            $data['payment_paypercut_environment'] = \Paypercut\Environment::normalize($this->config->get('payment_paypercut_environment'))
+                ?: \Paypercut\Environment::DEFAULT_ENVIRONMENT;
+        }
+
+        $data['environments'] = \Paypercut\Environment::ENVIRONMENTS;
 
         // Statement descriptor
         if (isset($this->request->post['payment_paypercut_statement_descriptor'])) {
@@ -168,6 +188,8 @@ class Paypercut extends \Opencart\System\Engine\Controller
         // Apple Pay domain verification file status (local + remote self-test)
         $data['applepay_domain_status'] = $this->checkApplePayDomainFile();
 
+        $data['debug_session'] = $this->load->controller('extension/paypercut/payment/paypercut_telemetry.panel');
+
         $data['header'] = $this->load->controller('common/header');
         $data['column_left'] = $this->load->controller('common/column_left');
         $data['footer'] = $this->load->controller('common/footer');
@@ -175,7 +197,10 @@ class Paypercut extends \Opencart\System\Engine\Controller
         // Add user token for AJAX requests
         $data['user_token'] = $this->session->data['user_token'];
 
-        $this->response->setOutput($this->load->view('extension/paypercut/payment/paypercut', $data));
+        $this->response->setOutput($this->load->view(
+            'extension/paypercut/payment/paypercut',
+            array_merge($this->language->all(), $data)
+        ));
     }
 
     protected function validate(): bool
@@ -312,7 +337,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
     private function getWebhook(string $webhook_id): ?array
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/webhooks/' . $webhook_id;
+        $api_url = $this->apiUrl('v1/webhooks/' . $webhook_id);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -336,7 +361,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
     private function findWebhookByUrl(string $webhook_url): ?array
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/webhooks';
+        $api_url = $this->apiUrl('v1/webhooks');
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -386,8 +411,12 @@ class Paypercut extends \Opencart\System\Engine\Controller
                 if ($existing) {
                     $json['error'] = 'Webhook already exists for this URL';
                     $json['webhook_id'] = $existing['id'];
+
+                    $this->report(\Paypercut\Telemetry\Event::failure('webhook.registration_failed', 'already_exists', [
+                        'source' => 'settings'
+                    ]));
                 } else {
-                    $api_url = 'https://api.paypercut.io/v1/webhooks';
+                    $api_url = $this->apiUrl('v1/webhooks');
 
                     // Create webhook with specific events enabled
                     $payload = [
@@ -410,8 +439,10 @@ class Paypercut extends \Opencart\System\Engine\Controller
                     $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                     curl_close($ch);
 
+                    $error_data = json_decode($response, true);
+
                     if ($http_code == 201 || $http_code == 200) {
-                        $result = json_decode($response, true);
+                        $result = $error_data;
 
                         // Store webhook ID and secret
                         $this->load->model('setting/setting');
@@ -422,9 +453,14 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
                         $json['success'] = 'Webhook created successfully';
                         $json['webhook_id'] = $result['id'];
+
+                        $this->report(\Paypercut\Telemetry\Event::of('webhook.registered', ['source' => 'settings']));
                     } else {
-                        $error_data = json_decode($response, true);
                         $json['error'] = isset($error_data['message']) ? $error_data['message'] : 'Failed to create webhook';
+
+                        $this->report(\Paypercut\Telemetry\Event::apiFailure('webhook.registration_failed', (int)$http_code, is_array($error_data) ? $error_data : array(), [
+                            'source' => 'settings'
+                        ]));
                     }
                 }
             }
@@ -449,7 +485,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
                 $json['error'] = 'No webhook configured';
             } else {
                 $api_key = $this->config->get('payment_paypercut_api_key');
-                $api_url = 'https://api.paypercut.io/v1/webhooks/' . $webhook_id;
+                $api_url = $this->apiUrl('v1/webhooks/' . $webhook_id);
 
                 $ch = curl_init();
                 curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -473,8 +509,15 @@ class Paypercut extends \Opencart\System\Engine\Controller
                     $this->model_setting_setting->editSetting('payment_paypercut', $settings);
 
                     $json['success'] = 'Webhook deleted successfully';
+
+                    $this->report(\Paypercut\Telemetry\Event::of('webhook.deleted', ['source' => 'settings']));
                 } else {
                     $json['error'] = 'Failed to delete webhook';
+
+                    $this->report(\Paypercut\Telemetry\Event::failure('webhook.delete_failed', 'rejected', [
+                        'source' => 'settings',
+                        'http_status' => (int)$http_code
+                    ]));
                 }
             }
         }
@@ -540,7 +583,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
     private function getPaymentMethodDomain(string $domain_name): ?array
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/payment_method_domains';
+        $api_url = $this->apiUrl('v1/payment_method_domains');
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -574,7 +617,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
     private function registerPaymentMethodDomain(string $domain_name): array
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/payment_method_domains';
+        $api_url = $this->apiUrl('v1/payment_method_domains');
 
         $payload = [
             'domain_name' => $domain_name
@@ -603,6 +646,8 @@ class Paypercut extends \Opencart\System\Engine\Controller
             $settings['payment_paypercut_domain_id'] = $result['id'];
             $this->model_setting_setting->editSetting('payment_paypercut', $settings);
 
+            $this->report(\Paypercut\Telemetry\Event::of('payment_domain.registered', ['source' => 'settings']));
+
             return [
                 'success' => true,
                 'message' => 'Domain registered successfully. Verification may be required.',
@@ -628,6 +673,10 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
             // Log the error for debugging
             $this->log->write('Paypercut domain registration failed: HTTP ' . $http_code . ' - ' . $error_message . ' | Response: ' . $response);
+
+            $this->report(\Paypercut\Telemetry\Event::apiFailure('payment_domain.registration_failed', (int)$http_code, is_array($error_data) ? $error_data : array(), [
+                'source' => 'settings'
+            ]));
 
             return array(
                 'success' => false,
@@ -866,7 +915,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
                 $json['error'] = 'API key is required';
             } else {
                 // Test connection by verifying account
-                $api_url = 'https://api.paypercut.io/v1/account';
+                $api_url = $this->apiUrl('v1/account');
 
                 $ch = curl_init();
                 curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -890,11 +939,28 @@ class Paypercut extends \Opencart\System\Engine\Controller
                     if (isset($result['business_name'])) {
                         $json['account_name'] = $result['business_name'];
                     }
+
+                    $this->report(\Paypercut\Telemetry\Event::of('connection.tested', [
+                        'ok' => true,
+                        'environment' => \Paypercut\Environment::normalize($this->config->get('payment_paypercut_environment')),
+                        'api_key_mode' => $mode
+                    ]));
                 } elseif ($http_code == 401) {
                     $json['error'] = 'Authentication failed. Please check your API key.';
+
+                    // The API quotes the rejected key back inside its message,
+                    // so the status is the whole diagnosis here.
+                    $this->report(\Paypercut\Telemetry\Event::failure('connection.tested', 'credentials_rejected', [
+                        'ok' => false,
+                        'http_status' => 401
+                    ]));
                 } else {
                     $error_data = json_decode($response, true);
                     $json['error'] = isset($error_data['message']) ? $error_data['message'] : 'Connection failed with HTTP ' . $http_code;
+
+                    $this->report(\Paypercut\Telemetry\Event::apiFailure('connection.tested', (int)$http_code, is_array($error_data) ? $error_data : array(), [
+                        'ok' => false
+                    ]));
                 }
             }
         }
@@ -914,7 +980,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
             return [];
         }
 
-        $api_url = 'https://api.paypercut.io/v1/payment-configs';
+        $api_url = $this->apiUrl('v1/payment-configs');
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -932,6 +998,10 @@ class Paypercut extends \Opencart\System\Engine\Controller
             $result = json_decode($response, true);
             return isset($result['items']) ? $result['items'] : [];
         }
+
+        $this->report(\Paypercut\Telemetry\Event::failure('settings.payment_configs_unreadable', 'lookup_failed', [
+            'http_status' => (int)$http_code
+        ]));
 
         return [];
     }
@@ -1085,6 +1155,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
             if (!$order_id) {
                 $json['error'] = 'Order ID is required';
+                $this->report(\Paypercut\Telemetry\Event::failure('refund.rejected', 'missing_order_id'));
             }
 
             $transaction = null;
@@ -1093,8 +1164,12 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
                 if (!$transaction) {
                     $json['error'] = 'No Paypercut transaction found for this order';
+                    $this->report(\Paypercut\Telemetry\Event::failure('refund.rejected', 'missing_payment_intent')
+                        ->about(['order_ref' => (string)$order_id]));
                 } elseif ($transaction['status'] !== 'succeeded') {
                     $json['error'] = 'Payment must be succeeded to refund';
+                    $this->report(\Paypercut\Telemetry\Event::failure('refund.rejected', 'payment_not_succeeded')
+                        ->about(['order_ref' => (string)$order_id]));
                 } else {
                     $total_refunded = $this->getOrderTotalRefunded($order_id);
                     if ($total_refunded >= $transaction['amount']) {
@@ -1105,8 +1180,12 @@ class Paypercut extends \Opencart\System\Engine\Controller
                         } else {
                             if ($refund_amount <= 0) {
                                 $json['error'] = 'Please enter a valid refund amount';
+                                $this->report(\Paypercut\Telemetry\Event::failure('refund.rejected', 'invalid_amount')
+                                    ->about(['order_ref' => (string)$order_id]));
                             } elseif (($total_refunded + $refund_amount) > $transaction['amount']) {
                                 $json['error'] = 'Refund amount exceeds the remaining balance';
+                                $this->report(\Paypercut\Telemetry\Event::failure('refund.rejected', 'invalid_amount')
+                                    ->about(['order_ref' => (string)$order_id]));
                             }
                         }
                     }
@@ -1126,6 +1205,10 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
                 if (isset($result['error'])) {
                     $json['error'] = $result['error'];
+
+                    $this->report(\Paypercut\Telemetry\Event::apiFailure('refund.failed', (int)($result['http_status'] ?? 0), array(), [
+                        'has_reason' => $refund_reason_text !== ''
+                    ])->about(['order_ref' => (string)$order_id]));
                 } else {
                     $this->storeRefundRecord(
                         $order_id,
@@ -1157,8 +1240,22 @@ class Paypercut extends \Opencart\System\Engine\Controller
                     $json['success'] = 'Refund processed successfully';
                     $json['refund_id'] = $result['refund_id'];
                     $json['amount'] = number_format($refund_amount, 2);
+
+                    // has_reason is a boolean on purpose: the reason text the
+                    // merchant types is on the "not shared" list.
+                    $this->report(\Paypercut\Telemetry\Event::of('refund.succeeded', [
+                        'is_partial' => !$is_full_refund,
+                        'has_reason' => $refund_reason_text !== '',
+                        'has_refund_id' => !empty($result['refund_id'])
+                    ])->about([
+                        'order_ref' => (string)$order_id,
+                        'payment_intent_id' => (string)($transaction['payment_intent'] ?? '')
+                    ]));
                 }
             } catch (\Exception $e) {
+                $this->report(\Paypercut\Telemetry\Event::failure('refund.failed', 'transport', [
+                    'has_reason' => $refund_reason_text !== ''
+                ], $e)->about(['order_ref' => (string)$order_id]));
                 $json['error'] = $e->getMessage();
             }
         }
@@ -1173,7 +1270,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
     private function processRefundApi(string $payment_id, string $payment_intent, float $amount, string $currency, string $reason = ''): array
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/refunds';
+        $api_url = $this->apiUrl('v1/refunds');
 
         if (!$api_key) {
             return ['error' => 'API key not configured'];
@@ -1211,7 +1308,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
         curl_close($ch);
 
         if ($curl_error) {
-            return ['error' => 'Connection error: ' . $curl_error];
+            return ['error' => 'Connection error: ' . $curl_error, 'http_status' => 0];
         }
 
         $result = json_decode($response, true);
@@ -1230,7 +1327,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
             $error_message = $result['error']['message'];
         }
 
-        return ['error' => $error_message];
+        return ['error' => $error_message, 'http_status' => (int)$http_code];
     }
 
     /**
@@ -1259,6 +1356,11 @@ class Paypercut extends \Opencart\System\Engine\Controller
      */
     public function install(): void
     {
+        $this->bootTelemetry();
+
+        // Telemetry's own key-value table (token, queue, runtime counters, locks)
+        \Paypercut\Telemetry\Store::install();
+
         // Create database tables
         $this->db->query("
             CREATE TABLE IF NOT EXISTS `" . DB_PREFIX . "paypercut_customer` (
@@ -1350,8 +1452,20 @@ class Paypercut extends \Opencart\System\Engine\Controller
             );
         }
 
-        // Register event for order info page to display Paypercut payment information
+        // Show every admin user that this store is currently sending
+        // diagnostics: the permission is held by more than one person, and the
+        // extension's own logger is gated on a merchant preference.
         $this->load->model('setting/event');
+        $this->model_setting_event->addEvent([
+            'code' => 'paypercut_telemetry_notice',
+            'description' => 'Show a notice while a Paypercut debug session is running',
+            'trigger' => 'admin/view/common/header/after',
+            'action' => 'extension/paypercut/payment/paypercut_telemetry.notice',
+            'status' => true,
+            'sort_order' => 1
+        ]);
+
+        // Register event for order info page to display Paypercut payment information
         $this->model_setting_event->addEvent([
             'code' => 'paypercut_order_info',
             'description' => 'Display Paypercut payment information on order info page',
@@ -1368,9 +1482,18 @@ class Paypercut extends \Opencart\System\Engine\Controller
      */
     public function uninstall(): void
     {
-        // Remove event
+        $this->bootTelemetry();
+
+        // end() is the single teardown path, so uninstalling destroys the token
+        // and both buffers before the table holding them is dropped.
+        \Paypercut\Telemetry\TelemetrySession::end('uninstalled');
+        \Paypercut\Telemetry\SentLog::clear();
+        \Paypercut\Telemetry\Store::purge();
+
+        // Remove events
         $this->load->model('setting/event');
         $this->model_setting_event->deleteEventByCode('paypercut_order_info');
+        $this->model_setting_event->deleteEventByCode('paypercut_telemetry_notice');
 
         // Note: We intentionally don't drop database tables to preserve transaction history
         // If you want to completely remove all data, manually drop these tables:
@@ -1378,5 +1501,84 @@ class Paypercut extends \Opencart\System\Engine\Controller
         // - oc_paypercut_transaction
         // - oc_paypercut_refund
         // - oc_paypercut_webhook_log
+    }
+
+    /**
+     * Absolute URL of a Paypercut API endpoint, on the store's environment.
+     */
+    private function apiUrl(string $path): string
+    {
+        $this->bootTelemetry();
+
+        return \Paypercut\Environment::apiBaseUri($this->config->get('payment_paypercut_environment')) . ltrim($path, '/');
+    }
+
+    /**
+     * Load the telemetry library and mark this as an admin request.
+     *
+     * OpenCart only reaches an admin controller through the admin front
+     * controller with a valid user token, which is the guard delivery needs
+     * before it may mint, POST or tear a session down.
+     */
+    private function bootTelemetry(): void
+    {
+        require_once dirname(__DIR__, 5) . '/system/library/paypercut/bootstrap.php';
+
+        \Paypercut\Bootstrap::boot($this->registry, true);
+    }
+
+    /**
+     * Keep a running debug session honest across a settings save.
+     *
+     * A token is bound to one API key and one environment, so a change to
+     * either ends the session; otherwise the configuration snapshot is re-sent,
+     * because a session that opened with one snapshot would otherwise read a
+     * setting changed mid-session against the snapshot taken before it.
+     *
+     * @param array $previous The connection as it was before the save.
+     */
+    private function syncTelemetryWithSettings(array $previous): void
+    {
+        $this->bootTelemetry();
+
+        // The in-request config still holds what this request started with.
+        foreach ($this->request->post as $key => $value) {
+            if (strpos((string)$key, 'payment_paypercut_') === 0) {
+                $this->config->set($key, $value);
+            }
+        }
+
+        \Paypercut\Telemetry\TelemetrySession::flushMemo();
+
+        $api_key = (string)($this->request->post['payment_paypercut_api_key'] ?? '');
+        $environment = (string)($this->request->post['payment_paypercut_environment'] ?? '');
+
+        if ($previous['environment'] !== $environment) {
+            \Paypercut\Telemetry\Flusher::announceAndEnd('environment_changed');
+
+            return;
+        }
+
+        if ($previous['api_key'] !== $api_key) {
+            \Paypercut\Telemetry\Flusher::announceAndEnd('key_changed');
+
+            return;
+        }
+
+        if (\Paypercut\Telemetry\TelemetrySession::isActiveFast()) {
+            $this->report(\Paypercut\Telemetry\Event::environmentConfiguration(
+                \Paypercut\Telemetry\EnvironmentSnapshot::values()
+            ));
+        }
+    }
+
+    /**
+     * Buffer one diagnostic event. Free when no debug session is running.
+     */
+    private function report(\Paypercut\Telemetry\Event $event): void
+    {
+        $this->bootTelemetry();
+
+        \Paypercut\Telemetry\EventRecorder::record($event);
     }
 }

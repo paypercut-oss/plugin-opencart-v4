@@ -93,8 +93,12 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
 
                 if (!$transaction) {
                     $json['error'] = $this->language->get('error_no_transaction');
+                    $this->report(\Paypercut\Telemetry\Event::failure('refund.rejected', 'missing_payment_intent')
+                        ->about(['order_ref' => (string)$order_id]));
                 } elseif ($transaction['status'] !== 'succeeded') {
                     $json['error'] = $this->language->get('error_payment_not_succeeded');
+                    $this->report(\Paypercut\Telemetry\Event::failure('refund.rejected', 'payment_not_succeeded')
+                        ->about(['order_ref' => (string)$order_id]));
                 } else {
                     // Check if already fully refunded
                     $total_refunded = $this->getTotalRefunded($order_id);
@@ -109,8 +113,12 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
                             // Partial refund - validate the amount
                             if ($refund_amount <= 0) {
                                 $json['error'] = $this->language->get('error_invalid_amount');
+                                $this->report(\Paypercut\Telemetry\Event::failure('refund.rejected', 'invalid_amount')
+                                    ->about(['order_ref' => (string)$order_id]));
                             } elseif (($total_refunded + $refund_amount) > $transaction['amount']) {
                                 $json['error'] = $this->language->get('error_exceeds_payment');
+                                $this->report(\Paypercut\Telemetry\Event::failure('refund.rejected', 'invalid_amount')
+                                    ->about(['order_ref' => (string)$order_id]));
                             }
                             $this->logError('Partial refund validated: ' . $refund_amount);
                         }
@@ -132,6 +140,10 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
 
                 if (isset($result['error'])) {
                     $json['error'] = $result['error'];
+
+                    $this->report(\Paypercut\Telemetry\Event::apiFailure('refund.failed', (int)($result['http_status'] ?? 0), array(), [
+                        'has_reason' => $refund_reason_text !== ''
+                    ])->about(['order_ref' => (string)$order_id]));
                 } else {
                     // Store refund in database
                     $this->storeRefund(
@@ -165,10 +177,24 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
                     $json['success'] = $this->language->get('text_refund_success');
                     $json['refund_id'] = $result['refund_id'];
                     $json['amount'] = number_format($refund_amount, 2);
+
+                    // has_reason is a boolean on purpose: the reason text the
+                    // merchant types is on the "not shared" list.
+                    $this->report(\Paypercut\Telemetry\Event::of('refund.succeeded', [
+                        'is_partial' => !$is_full_refund,
+                        'has_reason' => $refund_reason_text !== '',
+                        'has_refund_id' => !empty($result['refund_id'])
+                    ])->about([
+                        'order_ref' => (string)$order_id,
+                        'payment_intent_id' => (string)($transaction['payment_intent'] ?? '')
+                    ]));
                 }
             } catch (\Exception $e) {
                 $json['error'] = $e->getMessage();
                 $this->logError('Refund error: ' . $e->getMessage());
+                $this->report(\Paypercut\Telemetry\Event::failure('refund.failed', 'transport', [
+                    'has_reason' => $refund_reason_text !== ''
+                ], $e)->about(['order_ref' => (string)$order_id]));
             }
         }
 
@@ -229,10 +255,10 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
     private function processRefund(string $payment_id, string $payment_intent, float $amount, string $currency, string $reason = ''): array
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/refunds';
+        $api_url = $this->apiUrl('v1/refunds');
 
         if (!$api_key) {
-            return ['error' => $this->language->get('error_api_key_missing')];
+            return ['error' => $this->language->get('error_api_key_missing'), 'http_status' => 0];
         }
 
         $payload = [
@@ -268,12 +294,12 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
 
         if ($curl_error) {
             $this->logError('Refund cURL Error: ' . $curl_error);
-            return ['error' => $this->language->get('error_connection')];
+            return ['error' => $this->language->get('error_connection'), 'http_status' => 0];
         }
 
         if ($http_code == 0) {
             $this->logError('Refund API Timeout');
-            return ['error' => $this->language->get('error_timeout')];
+            return ['error' => $this->language->get('error_timeout'), 'http_status' => 0];
         }
 
         $result = json_decode($response, true);
@@ -295,7 +321,7 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
 
         $this->logError('Refund API Error (HTTP ' . $http_code . '): ' . $response);
 
-        return ['error' => $error_message];
+        return ['error' => $error_message, 'http_status' => (int)$http_code];
     }
 
     /**
@@ -394,7 +420,7 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
                 $api_key = $this->config->get('payment_paypercut_api_key');
                 $payment_id = $transaction['payment_id'];
 
-                $api_url = 'https://api.paypercut.io/v1/payments/' . $payment_id;
+                $api_url = $this->apiUrl('v1/payments/' . $payment_id);
 
                 $ch = curl_init();
                 curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -486,7 +512,7 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
                 $api_key = $this->config->get('payment_paypercut_api_key');
                 $payment_id = $transaction['payment_id'];
 
-                $api_url = 'https://api.paypercut.io/v1/payments/' . $payment_id . '/capture';
+                $api_url = $this->apiUrl('v1/payments/' . $payment_id . '/capture');
 
                 $payload = [];
                 if ($capture_amount > 0 && $capture_amount < $transaction['amount']) {
@@ -539,13 +565,30 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
 
                     $json['success'] = 'Payment captured successfully';
                     $json['payment_id'] = $payment_id;
+
+                    $this->report(\Paypercut\Telemetry\Event::of('payment.captured', [
+                        'source' => 'admin',
+                        'is_partial' => $capture_amount > 0 && $capture_amount < (float)$transaction['amount']
+                    ])->about([
+                        'payment_id' => (string)$payment_id,
+                        'order_ref' => (string)$order_id
+                    ]));
                 } else {
                     $error_data = json_decode($response, true);
                     $json['error'] = isset($error_data['message']) ? $error_data['message'] : 'Failed to capture payment';
+
+                    $this->report(\Paypercut\Telemetry\Event::apiFailure('payment.capture_failed', (int)$http_code, is_array($error_data) ? $error_data : array(), [
+                        'source' => 'admin'
+                    ])->about([
+                        'payment_id' => (string)$payment_id,
+                        'order_ref' => (string)$order_id
+                    ]));
                 }
             } catch (\Exception $e) {
                 $json['error'] = $e->getMessage();
                 $this->logError('Capture error: ' . $e->getMessage());
+                $this->report(\Paypercut\Telemetry\Event::failure('payment.capture_failed', 'transport', ['source' => 'admin'], $e)
+                    ->about(['order_ref' => (string)$order_id]));
             }
         }
 
@@ -590,7 +633,7 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
                 $api_key = $this->config->get('payment_paypercut_api_key');
                 $payment_id = $transaction['payment_id'];
 
-                $api_url = 'https://api.paypercut.io/v1/payments/' . $payment_id . '/cancel';
+                $api_url = $this->apiUrl('v1/payments/' . $payment_id . '/cancel');
 
                 $payload = [];
                 if ($cancel_reason) {
@@ -646,17 +689,70 @@ class PaypercutOrder extends \Opencart\System\Engine\Controller
 
                     $json['success'] = 'Payment canceled successfully';
                     $json['payment_id'] = $payment_id;
+
+                    // has_reason is a boolean on purpose: the reason text the
+                    // merchant types is on the "not shared" list.
+                    $this->report(\Paypercut\Telemetry\Event::of('payment.canceled', [
+                        'source' => 'admin',
+                        'has_reason' => (string)$cancel_reason !== ''
+                    ])->about([
+                        'payment_id' => (string)$payment_id,
+                        'order_ref' => (string)$order_id
+                    ]));
                 } else {
                     $error_data = json_decode($response, true);
                     $json['error'] = isset($error_data['message']) ? $error_data['message'] : 'Failed to cancel payment';
+
+                    $this->report(\Paypercut\Telemetry\Event::apiFailure('payment.cancel_failed', (int)$http_code, is_array($error_data) ? $error_data : array(), [
+                        'source' => 'admin'
+                    ])->about([
+                        'payment_id' => (string)$payment_id,
+                        'order_ref' => (string)$order_id
+                    ]));
                 }
             } catch (\Exception $e) {
                 $json['error'] = $e->getMessage();
                 $this->logError('Cancel error: ' . $e->getMessage());
+                $this->report(\Paypercut\Telemetry\Event::failure('payment.cancel_failed', 'transport', ['source' => 'admin'], $e)
+                    ->about(['order_ref' => (string)$order_id]));
             }
         }
 
         $this->response->addHeader('Content-Type: application/json');
         $this->response->setOutput(json_encode($json));
+    }
+
+    /**
+     * Absolute URL of a Paypercut API endpoint, on the store's environment.
+     */
+    private function apiUrl(string $path): string
+    {
+        $this->bootTelemetry();
+
+        return \Paypercut\Environment::apiBaseUri($this->config->get('payment_paypercut_environment')) . ltrim($path, '/');
+    }
+
+    /**
+     * Load the telemetry library and mark this as an admin request.
+     *
+     * OpenCart only reaches an admin controller through the admin front
+     * controller with a valid user token, which is the guard delivery needs
+     * before it may mint, POST or tear a session down.
+     */
+    private function bootTelemetry(): void
+    {
+        require_once dirname(__DIR__, 5) . '/system/library/paypercut/bootstrap.php';
+
+        \Paypercut\Bootstrap::boot($this->registry, true);
+    }
+
+    /**
+     * Buffer one diagnostic event. Free when no debug session is running.
+     */
+    private function report(\Paypercut\Telemetry\Event $event): void
+    {
+        $this->bootTelemetry();
+
+        \Paypercut\Telemetry\EventRecorder::record($event);
     }
 }

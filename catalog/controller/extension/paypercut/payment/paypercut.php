@@ -9,6 +9,8 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
     public function index()
     {
+        $this->bootTelemetry();
+
         $this->load->language('extension/paypercut/payment/paypercut');
 
         $data['button_confirm'] = $this->language->get('button_confirm');
@@ -118,6 +120,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
             }
         } catch (\Exception $e) {
             $this->logError('initEmbedded exception: ' . $e->getMessage());
+            $this->report(\Paypercut\Telemetry\Event::failure('checkout.embedded.create_failed', 'session_create', array(), $e));
             $json['error'] = 'Failed to initialize payment form: ' . $e->getMessage();
         }
 
@@ -128,7 +131,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
     private function getPaymentMethodsFromConfig($config_id)
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/payment-configs/' . $config_id;
+        $api_url = $this->apiUrl('v1/payment-configs/' . $config_id);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -362,8 +365,19 @@ class Paypercut extends \Opencart\System\Engine\Controller
             $json['redirect'] = $this->url->link('checkout/success', '', true);
 
             $this->logDebug('Order confirmed for embedded checkout: Order #' . $order_id . ', Checkout ID: ' . $checkout_id . ', Payment ID: ' . $payment_id);
+
+            $this->report(\Paypercut\Telemetry\Event::of('checkout.embedded.order_created', [
+                'order_status' => (string)$order_status_id,
+                'session_matched' => true,
+                'verified_status' => (string)($checkout_data['status'] ?? '')
+            ])->about([
+                'payment_id' => (string)$payment_id,
+                'order_ref' => (string)$order_id
+            ]));
         } catch (\Exception $e) {
             $this->logError('Order confirmation error: ' . $e->getMessage());
+            $this->report(\Paypercut\Telemetry\Event::failure('checkout.session_unverifiable', 'lookup_failed')
+                ->because('confirm threw ' . \Paypercut\Telemetry\Event::shortClassName($e)));
             $json['error'] = $e->getMessage();
         }
 
@@ -446,6 +460,13 @@ class Paypercut extends \Opencart\System\Engine\Controller
                 );
 
                 // Handle different payment statuses
+                $this->report(\Paypercut\Telemetry\Event::of('checkout.return.pending', [
+                    'payment_status' => (string)$payment_status
+                ])->about([
+                    'payment_id' => (string)$payment_id,
+                    'order_ref' => (string)$order_id
+                ]));
+
                 switch ($payment_status) {
                     case 'succeeded':
                         $comment = 'Payment completed via Paypercut' . PHP_EOL;
@@ -462,6 +483,15 @@ class Paypercut extends \Opencart\System\Engine\Controller
                             $comment,
                             true
                         );
+
+                        $this->report(\Paypercut\Telemetry\Event::of('payment.succeeded', [
+                            'payment_status' => 'succeeded',
+                            'order_status' => (string)$this->config->get('payment_paypercut_order_status_id'),
+                            'order_updated' => true
+                        ])->about([
+                            'payment_id' => (string)$payment_id,
+                            'order_ref' => (string)$order_id
+                        ]));
 
                         $this->response->redirect($this->url->link('extension/paypercut/payment/paypercut|success', '', true));
                         break;
@@ -484,11 +514,28 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
                         $order_status_id = $this->getOrderStatusForPaymentStatus('failed');
                         $this->model_checkout_order->addHistory($order_id, $order_status_id, $comment, false);
+
+                        $this->report(\Paypercut\Telemetry\Event::failure('payment.failed', \Paypercut\Telemetry\Event::identifier((string)$payment_status) ?: 'unknown', [
+                            'payment_status' => (string)$payment_status,
+                            'order_status' => (string)$order_status_id,
+                            'order_updated' => true
+                        ])->about([
+                            'payment_id' => (string)$payment_id,
+                            'order_ref' => (string)$order_id
+                        ]));
+
                         $this->response->redirect($this->url->link('extension/paypercut/payment/paypercut|failure', '', true));
                         break;
 
                     default:
                         $this->logError('Unknown payment status: ' . $payment_status);
+                        $this->report(\Paypercut\Telemetry\Event::failure('order.status_unhandled', 'unknown_payment_status', [
+                            'source' => 'return',
+                            'payment_status' => (string)$payment_status
+                        ])->about([
+                            'payment_id' => (string)$payment_id,
+                            'order_ref' => (string)$order_id
+                        ]));
                         $this->response->redirect($this->url->link('extension/paypercut/payment/paypercut|pending', '', true));
                 }
             } else {
@@ -496,6 +543,8 @@ class Paypercut extends \Opencart\System\Engine\Controller
             }
         } catch (\Exception $e) {
             $this->logError('Callback error: ' . $e->getMessage());
+            $this->report(\Paypercut\Telemetry\Event::failure('checkout.return.unverifiable', 'lookup_failed', array(), $e)
+                ->about(['order_ref' => (string)$order_id]));
             $this->response->redirect($this->url->link('extension/paypercut/payment/paypercut|failure', '', true));
         }
     }
@@ -611,20 +660,52 @@ class Paypercut extends \Opencart\System\Engine\Controller
                         : null
                 );
 
+                $this->report(\Paypercut\Telemetry\Event::of('payment.succeeded', [
+                    'session_status' => (string)$checkout_status,
+                    'order_status' => (string)$order_status_id,
+                    'order_updated' => true
+                ])->about([
+                    'payment_id' => (string)$payment_id,
+                    'order_ref' => (string)$order_id
+                ]));
+
+                $this->report(\Paypercut\Telemetry\Event::of('order.marked_paid', [
+                    'source' => 'return',
+                    'to_status' => (string)$order_status_id
+                ])->about(['order_ref' => (string)$order_id]));
+
                 // Redirect to success page
                 $this->response->redirect($this->url->link('checkout/success', '', true));
             } elseif ($checkout_status === 'expired') {
                 $this->logError('Checkout expired: ' . $checkout_id);
+
+                // An expired session is unambiguously a failure.
+                $this->report(\Paypercut\Telemetry\Event::failure('payment.failed', 'expired', [
+                    'session_status' => 'expired',
+                    'order_updated' => false
+                ])->about(['order_ref' => (string)$order_id]));
+
                 $this->response->redirect($this->url->link('extension/paypercut/payment/paypercut|failure', '', true));
             } elseif ($checkout_status === 'open') {
                 // Checkout is still open - payment not completed
                 $this->logError('Checkout still open (payment not completed): ' . $checkout_id);
+
+                // `open` is not a decline: the shopper may simply have come back
+                // before paying, so it gets its own name rather than being
+                // reported as a failed payment.
+                $this->report(\Paypercut\Telemetry\Event::failure('payment.closed_unpaid', 'open', [
+                    'session_status' => 'open',
+                    'order_updated' => false
+                ])->about(['order_ref' => (string)$order_id]));
+
                 $this->response->redirect($this->url->link('extension/paypercut/payment/paypercut|failure', '', true));
             } else {
                 throw new \Exception('Unknown checkout status: ' . $checkout_status);
             }
         } catch (\Exception $e) {
             $this->logError('Hosted checkout callback error: ' . $e->getMessage());
+            $this->report(\Paypercut\Telemetry\Event::failure('checkout.return.unverifiable', 'lookup_failed', array(), $e)
+                ->about(['order_ref' => (string)$order_id]));
             $this->response->redirect($this->url->link('extension/paypercut/payment/paypercut|failure', '', true));
         }
     }
@@ -746,12 +827,24 @@ class Paypercut extends \Opencart\System\Engine\Controller
                     : null
             );
 
+            $this->report(\Paypercut\Telemetry\Event::of('checkout.embedded.order_created', [
+                'order_status' => (string)$order_status_id,
+                'session_matched' => true,
+                'verified_status' => (string)($checkout_data['status'] ?? '')
+            ])->about([
+                'payment_id' => (string)$payment_id,
+                'payment_intent_id' => (string)$payment_intent,
+                'order_ref' => (string)$order_id
+            ]));
+
             // Redirect to success page
             $this->response->redirect($this->url->link('checkout/success', '', true));
         } catch (\Exception $e) {
             // Log error
             $log = new \Opencart\System\Library\Log('paypercut_error.log');
             $log->write('Embedded checkout callback error: ' . $e->getMessage());
+
+            $this->report(\Paypercut\Telemetry\Event::failure('checkout.return.unverifiable', 'lookup_failed', array(), $e));
 
             // Redirect to failure page
             $this->response->redirect($this->url->link('checkout/failure', '', true));
@@ -842,13 +935,23 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
     public function webhook()
     {
+        $this->bootTelemetry();
+
         // Get the raw POST data
         $payload = file_get_contents('php://input');
         $signature = isset($_SERVER['HTTP_X_PAYPERCUT_SIGNATURE']) ? $_SERVER['HTTP_X_PAYPERCUT_SIGNATURE'] : '';
 
-        // Verify webhook signature
-        if (!$this->verifyWebhookSignature($payload, $signature)) {
+        // Verify webhook signature. A merchant whose orders never leave
+        // "pending" is almost always looking at one of these rejections — a
+        // rotated secret or a signature that never matched — and none of it is
+        // visible from Paypercut's side.
+        $rejection = $this->webhookRejection($payload, $signature);
+
+        if ($rejection !== '') {
             $this->log('Webhook signature verification failed');
+            $this->report(\Paypercut\Telemetry\Event::failure('webhook.rejected', $rejection, [
+                'http_status' => 401
+            ]));
             http_response_code(401);
             return;
         }
@@ -857,12 +960,21 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
         if (!$data) {
             $this->log('Invalid webhook payload');
+            $this->report(\Paypercut\Telemetry\Event::failure('webhook.payload_invalid', 'empty_or_unparsable', [
+                'http_status' => 400
+            ]));
             http_response_code(400);
             return;
         }
 
         // Log webhook event
         $this->log('Webhook received: ' . ($data['type'] ?? 'unknown'));
+
+        $duplicate = $this->isWebhookLogged((string)($data['id'] ?? ''));
+
+        $this->report(\Paypercut\Telemetry\Event::of('webhook.received', $duplicate
+            ? ['duplicate' => true]
+            : ['duplicate' => false, 'type' => \Paypercut\Telemetry\Event::identifier((string)($data['type'] ?? '')) ?: 'unknown']));
 
         // Store webhook event in database if logging is enabled
         if ($this->config->get('payment_paypercut_logging')) {
@@ -880,6 +992,10 @@ class Paypercut extends \Opencart\System\Engine\Controller
                     break;
                 default:
                     $this->log('Unhandled webhook event type: ' . $data['type']);
+                    $this->report(\Paypercut\Telemetry\Event::of('webhook.skipped', [
+                        'webhook' => \Paypercut\Telemetry\Event::identifier((string)$data['type']) ?: 'unknown',
+                        'reason' => 'unhandled_type'
+                    ]));
                     http_response_code(501);
                     return;
             }
@@ -888,13 +1004,39 @@ class Paypercut extends \Opencart\System\Engine\Controller
         http_response_code(200);
     }
 
-    private function verifyWebhookSignature($payload, $signature)
+    /**
+     * The reason this delivery was refused, or '' when it is genuine.
+     */
+    private function webhookRejection($payload, $signature): string
     {
         $webhook_secret = $this->config->get('payment_paypercut_webhook_secret');
 
         if (empty($webhook_secret)) {
             // If no secret configured, skip verification (not recommended for production)
             $this->log('Warning: Webhook secret not configured, skipping signature verification');
+            $this->report(\Paypercut\Telemetry\Event::of('webhook.skipped', [
+                'webhook' => 'signature',
+                'reason' => 'webhook_secret_not_configured'
+            ]));
+            return '';
+        }
+
+        if ($payload === '' || $payload === false) {
+            return 'empty_body';
+        }
+
+        if ($signature === '') {
+            return 'missing_signature';
+        }
+
+        return $this->verifyWebhookSignature($payload, $signature) ? '' : 'invalid_signature';
+    }
+
+    private function verifyWebhookSignature($payload, $signature)
+    {
+        $webhook_secret = $this->config->get('payment_paypercut_webhook_secret');
+
+        if (empty($webhook_secret)) {
             return true;
         }
 
@@ -927,6 +1069,11 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
         if ($query->num_rows === 0) {
             $this->log('No transaction found for checkout_id: ' . $checkout_id);
+            $this->report(\Paypercut\Telemetry\Event::failure('webhook.unresolved', 'order_not_found', [
+                'http_status' => 503,
+                'has_client_reference_id' => false,
+                'has_metadata' => !empty($intent['metadata'])
+            ])->about(['payment_id' => (string)($intent['id'] ?? '')]));
             return;
         }
 
@@ -948,6 +1095,14 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
             $this->model_checkout_order->addHistory($order_id, $order_status_id, $comment, true);
             $this->log($data['type'] . ' processed for order #' . $order_id);
+
+            $this->report(\Paypercut\Telemetry\Event::of('webhook.order_updated', [
+                'payment_status' => 'succeeded',
+                'order_status' => (string)$order_status_id
+            ])->about([
+                'payment_id' => (string)($intent['id'] ?? ''),
+                'order_ref' => (string)$order_id
+            ]));
         }
     }
 
@@ -962,6 +1117,11 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
         if (!$order_id) {
             $this->log('checkout_session.completed missing client_reference_id');
+            $this->report(\Paypercut\Telemetry\Event::failure('webhook.unresolved', 'order_not_found', [
+                'http_status' => 503,
+                'has_client_reference_id' => false,
+                'has_metadata' => !empty($session['metadata'])
+            ])->about(['payment_id' => (string)($session['id'] ?? '')]));
             return;
         }
 
@@ -976,6 +1136,20 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
         if ($status !== 'complete' || $payment_status !== 'paid') {
             $this->log('checkout_session.completed skipped: status=' . $status . ' payment_status=' . $payment_status);
+
+            // `complete` + not `paid` is not a decline: paycore sets exactly
+            // that on a successful authorisation awaiting manual capture, so it
+            // gets its own name rather than being reported as one.
+            $name = $status === 'expired' ? 'payment.failed' : 'payment.closed_unpaid';
+
+            $this->report(\Paypercut\Telemetry\Event::failure($name, \Paypercut\Telemetry\Event::identifier((string)$payment_status) ?: 'unknown', [
+                'payment_status' => (string)$payment_status,
+                'session_status' => (string)$status,
+                'order_updated' => false
+            ])->about([
+                'payment_id' => (string)($session['id'] ?? ''),
+                'order_ref' => (string)$order_id
+            ]));
             return;
         }
 
@@ -990,6 +1164,19 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
             $this->model_checkout_order->addHistory($order_id, $order_status_id, $comment, true);
             $this->log('checkout_session.completed processed for order #' . $order_id);
+
+            $this->report(\Paypercut\Telemetry\Event::of('webhook.order_updated', [
+                'payment_status' => (string)$payment_status,
+                'order_status' => (string)$order_status_id
+            ])->about([
+                'payment_id' => (string)($session['id'] ?? ''),
+                'order_ref' => (string)$order_id
+            ]));
+
+            $this->report(\Paypercut\Telemetry\Event::of('order.marked_paid', [
+                'source' => 'webhook',
+                'to_status' => (string)$order_status_id
+            ])->about(['order_ref' => (string)$order_id]));
         }
     }
 
@@ -1029,6 +1216,27 @@ class Paypercut extends \Opencart\System\Engine\Controller
                 processed = 1,
                 created_at = NOW()
         ");
+    }
+
+    /**
+     * Has this delivery id been seen before?
+     *
+     * Read-only, so it can run before the handler decides anything: the panel
+     * needs to distinguish a redelivery from a first attempt.
+     */
+    private function isWebhookLogged(string $event_id): bool
+    {
+        if ($event_id === '') {
+            return false;
+        }
+
+        $query = $this->db->query("
+            SELECT log_id FROM `" . DB_PREFIX . "paypercut_webhook_log`
+            WHERE event_id = '" . $this->db->escape($event_id) . "'
+            LIMIT 1
+        ");
+
+        return (bool)$query->num_rows;
     }
 
     /**
@@ -1199,7 +1407,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
     private function sendPaymentRequest($data)
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/checkouts';
+        $api_url = $this->apiUrl('v1/checkouts');
 
         if (!$api_key) {
             return array('error' => $this->language->get('error_api_key_missing'));
@@ -1209,6 +1417,10 @@ class Paypercut extends \Opencart\System\Engine\Controller
         $currency = strtoupper($data['currency']);
         if (!$this->isCurrencySupported($currency)) {
             $this->logError('Unsupported currency attempted: ' . $currency);
+
+            $this->report(\Paypercut\Telemetry\Event::failure('checkout.session_create_failed', 'currency_unsupported', [
+                'store_currency' => $currency
+            ])->about(['order_ref' => (string)$data['order_id']]));
 
             // Disable payment method
             $this->load->model('setting/setting');
@@ -1315,25 +1527,57 @@ class Paypercut extends \Opencart\System\Engine\Controller
             curl_setopt($ch, CURLOPT_TIMEOUT, 30); // 30 seconds timeout
             curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10); // 10 seconds connection timeout
 
+            $started = microtime(true);
             $response = curl_exec($ch);
             $curl_error = curl_error($ch);
             $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
+            $duration_ms = (int)round((microtime(true) - $started) * 1000);
 
             // Handle cURL errors
             if ($curl_error) {
                 $this->logError('cURL Error: ' . $curl_error);
+                // A connect failure that took the whole timeout is a network
+                // black hole; one that returned at once is DNS or a refused
+                // port — which is why duration_ms travels with it.
+                $this->report(\Paypercut\Telemetry\Event::failure('api.request_failed', 'transport', [
+                    'api_context' => 'create_checkout',
+                    'duration_ms' => $duration_ms
+                ]));
+                $this->report(\Paypercut\Telemetry\Event::failure('checkout.session_create_failed', 'transport')
+                    ->about(['order_ref' => (string)$data['order_id']]));
                 return array('error' => $this->language->get('error_connection'));
             }
 
             // Handle timeout
             if ($http_code == 0) {
                 $this->logError('API Timeout: No response from Paypercut API');
+                $this->report(\Paypercut\Telemetry\Event::failure('api.request_failed', 'connect', [
+                    'api_context' => 'create_checkout',
+                    'duration_ms' => $duration_ms
+                ]));
+                $this->report(\Paypercut\Telemetry\Event::failure('checkout.session_create_failed', 'transport')
+                    ->about(['order_ref' => (string)$data['order_id']]));
                 return array('error' => $this->language->get('error_timeout'));
+            }
+
+            if ($duration_ms >= \Paypercut\Telemetry\TelemetrySession::SLOW_REQUEST_MS) {
+                $this->report(\Paypercut\Telemetry\Event::of('api.request_slow', [
+                    'api_context' => 'create_checkout',
+                    'method' => 'POST',
+                    'duration_ms' => $duration_ms
+                ]));
             }
 
             // Parse response
             $result = json_decode($response, true);
+
+            if ($response !== false && $result === null) {
+                $this->report(\Paypercut\Telemetry\Event::failure('api.response_unparsable', 'decode_failed', [
+                    'api_context' => 'create_checkout',
+                    'body_bytes' => strlen((string)$response)
+                ]));
+            }
 
             if ($http_code == 201 || $http_code == 200) {
                 $checkout_mode = $this->config->get('payment_paypercut_checkout_mode') ?: 'hosted';
@@ -1341,12 +1585,19 @@ class Paypercut extends \Opencart\System\Engine\Controller
                 if ($checkout_mode === 'embedded') {
                     // For embedded mode, return the checkout ID
                     if (isset($result['id'])) {
+                        $this->report(\Paypercut\Telemetry\Event::of('checkout.embedded.session_created')
+                            ->about([
+                                'payment_intent_id' => (string)($result['payment_intent'] ?? ''),
+                                'order_ref' => (string)$data['order_id']
+                            ]));
                         return array(
                             'checkout_id' => $result['id'],
                             'mode' => 'embedded'
                         );
                     } else {
                         $this->logError('Invalid API response: Missing checkout ID');
+                        $this->report(\Paypercut\Telemetry\Event::failure('checkout.embedded.create_failed', 'no_session_id')
+                            ->about(['order_ref' => (string)$data['order_id']]));
                         return array('error' => $this->language->get('error_invalid_response'));
                     }
                 } else {
@@ -1359,6 +1610,13 @@ class Paypercut extends \Opencart\System\Engine\Controller
                         // (session may be lost after external redirect)
                         $this->storePendingCheckout($data['order_id'], $result['id']);
 
+                        $this->report(\Paypercut\Telemetry\Event::of('checkout.hosted.redirected', [
+                            'order_status' => 'pending'
+                        ])->about([
+                            'payment_id' => (string)$result['id'],
+                            'order_ref' => (string)$data['order_id']
+                        ]));
+
                         return array(
                             'payment_url' => $result['url'],
                             'checkout_id' => $result['id'],
@@ -1366,6 +1624,8 @@ class Paypercut extends \Opencart\System\Engine\Controller
                         );
                     } else {
                         $this->logError('Invalid API response: Missing payment URL');
+                        $this->report(\Paypercut\Telemetry\Event::failure('checkout.hosted.redirect_missing', 'redirect_absent')
+                            ->about(['order_ref' => (string)$data['order_id']]));
                         return array('error' => $this->language->get('error_invalid_response'));
                     }
                 }
@@ -1379,9 +1639,23 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
             $this->logError('API Error (HTTP ' . $http_code . '): ' . $error_message . ' | Response: ' . $response);
 
+            $body = is_array($result) ? $result : array();
+
+            $this->report(\Paypercut\Telemetry\Event::apiFailure('api.request_failed', (int)$http_code, $body, [
+                'api_context' => 'create_checkout',
+                'duration_ms' => $duration_ms
+            ]));
+            $this->report(\Paypercut\Telemetry\Event::apiFailure(
+                $checkout_mode === 'embedded' ? 'checkout.embedded.create_failed' : 'checkout.hosted.create_failed',
+                (int)$http_code,
+                $body
+            )->about(['order_ref' => (string)$data['order_id']]));
+
             return array('error' => $error_message);
         } catch (\Exception $e) {
             $this->logError('Exception in sendPaymentRequest: ' . $e->getMessage());
+            $this->report(\Paypercut\Telemetry\Event::failure('checkout.hosted.create_failed', 'session_create', array(), $e)
+                ->about(['order_ref' => (string)($data['order_id'] ?? '')]));
             return array('error' => $this->language->get('error_payment'));
         }
     }
@@ -1389,7 +1663,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
     private function verifyPayment($payment_id)
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/payments/' . $payment_id;
+        $api_url = $this->apiUrl('v1/payments/' . $payment_id);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -1415,7 +1689,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
 
-        $api_url = 'https://api.paypercut.io/v1/checkouts/' . $checkout_id;
+        $api_url = $this->apiUrl('v1/checkouts/' . $checkout_id);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -1434,6 +1708,9 @@ class Paypercut extends \Opencart\System\Engine\Controller
 
         if ($curl_error) {
             $this->logError('Checkout verification cURL Error: ' . $curl_error);
+            $this->report(\Paypercut\Telemetry\Event::failure('api.request_failed', 'transport', [
+                'api_context' => 'verify_checkout'
+            ]));
             return null;
         }
 
@@ -1443,6 +1720,11 @@ class Paypercut extends \Opencart\System\Engine\Controller
         }
 
         $this->logError('Checkout verification failed (HTTP ' . $http_code . '): ' . $response);
+        $this->report(\Paypercut\Telemetry\Event::apiFailure('api.request_failed', (int)$http_code, is_array(json_decode((string)$response, true)) ? json_decode((string)$response, true) : array(), [
+            'api_context' => 'verify_checkout'
+        ]));
+        $this->report(\Paypercut\Telemetry\Event::failure('checkout.session_unverifiable', 'lookup_failed')
+            ->because('checkout lookup returned HTTP ' . (int)$http_code));
         return null;
     }
 
@@ -1586,7 +1868,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
         }
 
         // Create new Paypercut customer
-        $api_url = 'https://api.paypercut.io/v1/customers';
+        $api_url = $this->apiUrl('v1/customers');
 
         $payload = array(
             'email' => $customer_data['email'],
@@ -1679,7 +1961,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
     private function updatePaypercutCustomer($paypercut_id, $customer_data)
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/customers/' . $paypercut_id;
+        $api_url = $this->apiUrl('v1/customers/' . $paypercut_id);
 
         $payload = array(
             'email' => $customer_data['email'],
@@ -1722,7 +2004,7 @@ class Paypercut extends \Opencart\System\Engine\Controller
     private function verifyPaypercutCustomerExists($paypercut_id)
     {
         $api_key = $this->config->get('payment_paypercut_api_key');
-        $api_url = 'https://api.paypercut.io/v1/customers/' . $paypercut_id;
+        $api_url = $this->apiUrl('v1/customers/' . $paypercut_id);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $api_url);
@@ -1766,5 +2048,36 @@ class Paypercut extends \Opencart\System\Engine\Controller
         ");
 
         $this->logError('Deleted stale PayPerCut customer mapping: ' . $paypercut_id);
+    }
+
+    /**
+     * Absolute URL of a Paypercut API endpoint, on the store's environment.
+     */
+    private function apiUrl(string $path): string
+    {
+        $this->bootTelemetry();
+
+        return \Paypercut\Environment::apiBaseUri($this->config->get('payment_paypercut_environment')) . ltrim($path, '/');
+    }
+
+    /**
+     * Load the telemetry library. Storefront context: never marked admin, so
+     * nothing here can mint, POST or end a session.
+     */
+    private function bootTelemetry(): void
+    {
+        require_once dirname(__DIR__, 5) . '/system/library/paypercut/bootstrap.php';
+
+        \Paypercut\Bootstrap::boot($this->registry);
+    }
+
+    /**
+     * Buffer one diagnostic event. Free when no debug session is running.
+     */
+    private function report(\Paypercut\Telemetry\Event $event): void
+    {
+        $this->bootTelemetry();
+
+        \Paypercut\Telemetry\EventRecorder::record($event);
     }
 }

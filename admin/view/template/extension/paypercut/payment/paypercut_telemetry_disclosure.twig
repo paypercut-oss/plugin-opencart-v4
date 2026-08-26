@@ -1,0 +1,15 @@
+{#
+  The "what is shared" disclosure.
+
+  One source for both the panel and the consent modal, and the wording a
+  merchant agrees to. Keep it in step with docs/telemetry.md and with any store
+  listing that repeats it — a merchant agreeing to one thing while the listing
+  says another is a real problem regardless of who reads it.
+#}
+<details class="mt-2">
+  <summary>{{ text_debug_disclosure_summary }}</summary>
+  <p class="mt-2">{{ text_debug_disclosure_shared }}</p>
+  <p><strong>{{ text_debug_disclosure_not_shared_label }}</strong> {{ text_debug_disclosure_not_shared }}</p>
+  <p>{{ text_debug_disclosure_api_key }}</p>
+  <p>{{ text_debug_disclosure_retention }}</p>
+</details>
