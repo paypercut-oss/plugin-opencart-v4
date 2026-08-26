@@ -66,6 +66,10 @@ final class Environment
      *
      * Unlike the API base this does NOT fall back to production: an unknown
      * environment must yield no debug session rather than a confusing one.
+     *
+     * There is deliberately no override here. Anything that moves this host
+     * without moving the mint host earns a 401 the session cannot recover from,
+     * because a token minted for one environment is a forgery to every other.
      */
     public static function telemetryBaseUri(string $environment = ''): string
     {
@@ -73,13 +77,6 @@ final class Environment
 
         if ($environment === '') {
             return '';
-        }
-
-        // Not honoured on production: a constant left in config.php after
-        // debugging must not retarget a live store's telemetry, and the mint
-        // host — resolved separately — would not follow it.
-        if ($environment !== 'production' && defined('PAYPERCUT_TELEMETRY_BASE_URI')) {
-            return self::allowedPaypercutBase((string)constant('PAYPERCUT_TELEMETRY_BASE_URI'));
         }
 
         return self::allowedPaypercutBase(self::$telemetry_base_uris[$environment]);

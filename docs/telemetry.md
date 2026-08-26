@@ -37,10 +37,10 @@ started against the wrong environment. Both bases are validated: only `https` on
 a host ending in `paypercut.net` or `paypercut.io` is accepted, because the
 store's API key travels on the mint request.
 
-A `PAYPERCUT_TELEMETRY_BASE_URI` constant in `config.php` overrides the edge for
-a non-production environment. It is ignored on production: a constant left
-behind after debugging must not retarget a live store, and the mint host would
-not follow it anyway.
+There is no override for either host. Both come from the one stored environment
+value in one call sequence, because a token minted for one environment is a
+forgery to every other environment's edge — and the 401 that follows ends the
+session for good.
 
 ## Pieces
 

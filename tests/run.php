@@ -77,6 +77,11 @@ check('a lookalike tld is refused', Environment::allowedPaypercutBase('https://p
 check('plain http is refused', Environment::allowedPaypercutBase('http://telemetry.paypercut.io/'), '');
 check('an empty base is refused', Environment::allowedPaypercutBase(''), '');
 
+// A constant that moved the edge without moving the mint host would earn a 401
+// the session never recovers from, so there is no override to honour.
+define('PAYPERCUT_TELEMETRY_BASE_URI', 'https://telemetry.elsewhere.paypercut.net/');
+check('no config constant can move the edge host', Environment::telemetryBaseUri('dev'), 'https://telemetry.dev.paypercut.net/');
+
 /* ------------------------------------------------------------ deny assertion */
 
 $secrets = ['sk_live_realstorekey', 'whsec_realwebhooksecret'];
