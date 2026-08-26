@@ -122,6 +122,72 @@ check(
     true
 );
 
+/* ------------------------------------------- whole-envelope deny screening */
+
+// The gate screens the envelope as it will be sent. A correlation id copied
+// from a webhook body is as untrusted as an attribute, and on a store with no
+// webhook secret configured it is anybody's to write.
+
+/**
+ * The same structure with every leaf replaced by a value that must be denied.
+ */
+function poisonLeaves($value, string $poison)
+{
+    if (!is_array($value)) {
+        return $poison;
+    }
+
+    foreach ($value as $key => $item) {
+        $value[$key] = poisonLeaves($item, $poison);
+    }
+
+    return $value;
+}
+
+$opaque = '9f8a7b6c5d4e3f21';
+$store_secrets = array_merge($secrets, [$opaque]);
+
+$maximal = Event::failure(
+    'checkout.hosted.create_failed',
+    'session_create',
+    ['api_context' => 'create_checkout'],
+    new \RuntimeException('boom')
+)
+    ->because('order 178 had no Paypercut session')
+    ->about(['payment_intent_id' => 'pi_1', 'payment_id' => 'pay_1', 'order_ref' => '178'])
+    ->envelope(1787250271);
+
+// Fails the moment a field is added to Event::envelope() without a decision
+// about screening it: the poison loop below is driven by these keys.
+check('the envelope carries exactly the fields the screen covers', array_keys($maximal), [
+    'event',
+    'occurred_at',
+    'payment_intent_id',
+    'payment_id',
+    'order_ref',
+    'error',
+    'attrs'
+]);
+
+check('a clean envelope survives the gate', EventQueue::isSafe($maximal, $store_secrets), true);
+
+$poisons = [
+    'a Luhn-valid PAN'          => 'Card 4111111111111111 was declined',
+    'a spaced PAN'              => '4111 1111 1111 1111',
+    'a credential shape'        => 'rejected ppc_live_store_secret',
+    'the literal API key'       => 'call failed for ' . $opaque,
+    'an API key cut by a clamp' => str_repeat('x', 245) . substr($opaque, 0, 11)
+];
+
+foreach (array_keys($maximal) as $field) {
+    foreach ($poisons as $label => $poison) {
+        $envelope = $maximal;
+        $envelope[$field] = poisonLeaves($envelope[$field], $poison);
+
+        check($label . ' in ' . $field . ' drops the event', EventQueue::isSafe($envelope, $store_secrets), false);
+    }
+}
+
 /* --------------------------------------------------- named constructors only */
 
 $snapshot = Event::environmentSnapshot([

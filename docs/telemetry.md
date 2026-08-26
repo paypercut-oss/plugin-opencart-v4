@@ -190,12 +190,22 @@ submitted input back** — a rejected key appears inside the error message — s
 `api_code` / `api_param` / `trace_id` / `error.type` instead. A message the
 module authored itself is the diagnosis and stays.
 
-`EventQueue::append()` is the last gate. It screens `attrs` **and** `error`
-(including `error.stack`) against five rules — denied key names, credential
-value shapes, a Luhn PAN check, a literal comparison against the store's actual
-secrets, and two levels of recursion — and drops the **whole event** rather than
-the offending field. A field that trips the assertion means the event was
-assembled wrongly, so the rest of it cannot be trusted either.
+`EventQueue::append()` is the last gate. It screens the **whole envelope as it
+will be serialised** — `attrs`, `error` (including `error.stack`) and the
+correlation ids `about()` writes as top-level siblings — against five rules:
+denied key names, credential value shapes, a Luhn PAN check, a literal
+comparison against the store's actual secrets (including a head of one left
+behind by the 256-byte clamp), and two levels of recursion. It drops the
+**whole event** rather than the offending field: a field that trips the
+assertion means the event was assembled wrongly, so the rest of it cannot be
+trusted either.
+
+Screening the correlation ids is not optional. `payment_id` and `order_ref` are
+copied straight out of a webhook body, and a store with no webhook secret
+configured accepts unsigned deliveries — so those ids are an unauthenticated
+caller's to write. `tests/run.php` pins this by poisoning **every** field of a
+maximal envelope in turn, and fails if a field is added to `Event::envelope()`
+without a decision about screening it.
 
 `TelemetrySession::credentials()` must enumerate every credential-bearing
 setting. It currently lists `payment_paypercut_api_key` and

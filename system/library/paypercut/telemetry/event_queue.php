@@ -59,17 +59,7 @@ final class EventQueue
         $safe = [];
 
         foreach ($envelopes as $envelope) {
-            // `error` is a top-level sibling of `attrs`, so it has to be named
-            // here or it bypasses the one gate every producer funnels through.
-            $screened = [];
-
-            foreach (['attrs', 'error'] as $field) {
-                if (isset($envelope[$field]) && is_array($envelope[$field])) {
-                    $screened[$field] = $envelope[$field];
-                }
-            }
-
-            if (Event::isDenied($screened, $secrets)) {
+            if (!self::isSafe($envelope, $secrets)) {
                 TelemetrySession::audit('Telemetry: event dropped by the deny assertion', [
                     'event' => (string)($envelope['event'] ?? 'unknown')
                 ]);
@@ -81,6 +71,21 @@ final class EventQueue
         }
 
         return $safe;
+    }
+
+    /**
+     * Screen one envelope exactly as it will be serialised.
+     *
+     * The whole envelope, not a named subset of it: `error` and `attrs` are not
+     * the only places untrusted text lands. The correlation ids `about()`
+     * writes as top-level siblings are copied from webhook bodies, which on a
+     * store with no webhook secret configured are anybody's to write.
+     *
+     * Public so the suite can pin the gate itself rather than a copy of it.
+     */
+    public static function isSafe(array $envelope, array $secrets): bool
+    {
+        return !Event::isDenied($envelope, $secrets);
     }
 
     /**

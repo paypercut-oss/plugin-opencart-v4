@@ -31,6 +31,14 @@ final class Event
 
     const MAX_STACK_FRAMES = 8;
 
+    /**
+     * Shortest run of a credential that still counts as that credential.
+     *
+     * text() clamps before this assertion ever runs, so a secret at the end of
+     * a long message reaches the wire with its tail cut off.
+     */
+    const MIN_SECRET_FRAGMENT = 8;
+
     /** Field names that must never appear, whatever their value. */
     const DENIED_KEY_PATTERN = '/secret|token|password|credential|nonce|auth|_key$/i';
 
@@ -432,9 +440,32 @@ final class Event
             // credentials is not. This catches a secret in a format nobody
             // anticipated, including one a future Paypercut release introduces.
             foreach ($secrets as $secret) {
-                if (is_string($secret) && $secret !== '' && strpos($value, $secret) !== false) {
+                if (!is_string($secret) || $secret === '') {
+                    continue;
+                }
+
+                if (strpos($value, $secret) !== false || self::endsWithSecretHead($value, $secret)) {
                     return true;
                 }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * True when the value ends in the head of a credential.
+     *
+     * Clamping only ever removes the tail, so a truncated secret survives as a
+     * suffix of the value and the whole-string comparison above misses it.
+     */
+    private static function endsWithSecretHead(string $value, string $secret): bool
+    {
+        $longest = min(strlen($value), strlen($secret) - 1);
+
+        for ($length = $longest; $length >= self::MIN_SECRET_FRAGMENT; $length--) {
+            if (strncmp($secret, substr($value, -$length), $length) === 0) {
+                return true;
             }
         }
 
