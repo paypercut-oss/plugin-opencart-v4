@@ -292,6 +292,7 @@ check('an identifier passes through', Event::identifier('hosted'), 'hosted');
 check('an email is dropped, not mangled', Event::identifier('jane@example.com'), '');
 check('an address is dropped', Event::identifier('12 Sunset Road'), '');
 check('an over-long identifier is dropped', Event::identifier(str_repeat('a', 65)), '');
+check('a trailing newline is not identifier-shaped', Event::identifier("charge.succeeded\n"), '');
 
 /* ------------------------------------------------------------------ envelope */
 
@@ -308,6 +309,33 @@ check('a non-scalar attribute is dropped', Event::of('x', ['a' => ['b']])->field
 check('a false boolean survives', Event::of('x', ['duplicate' => false])->fields(), ['duplicate' => false]);
 check('an int survives', Event::of('x', ['http_status' => 503])->fields(), ['http_status' => 503]);
 check('attrs are capped', count(Event::of('x', array_fill_keys(range(1, 40), 'v'))->fields()), Event::MAX_ATTRS);
+
+// cleanAttrs() is not the boundary: apiFailure() appends four more fields after
+// it, and the edge silently drops whatever is past the cap in sorted key order.
+$wide = Event::apiFailure('api.request_failed', 401, ['error' => ['code' => 'token_invalid'], 'trace_id' => 'da74bc'], array_fill_keys(array_map(function ($i) {
+    return 'attr_' . $i;
+}, range(1, 16)), 'v'))->envelope(1);
+
+check('the envelope enforces MAX_ATTRS', count($wide['attrs']), Event::MAX_ATTRS);
+check('the envelope caps in sorted key order, as the edge does', array_key_first($wide['attrs']), 'api_code');
+
+// A code like authorize_net matches DENIED_KEY_PATTERN and would otherwise cost
+// the whole 14-extension chunk, silently and with nothing to say which store.
+$inventory = Event::environmentPlugins([
+    'authorize_net' => '1.0.0',
+    'paypercut'     => '1.0.5',
+    'ocmod_theme'   => '2.1'
+]);
+
+check('a denied-shaped code does not bin the inventory', array_keys($inventory[0]->fields()), [
+    'plugin_count',
+    'chunk',
+    'paypercut',
+    'ocmod_theme',
+    'screened'
+]);
+check('the inventory says how many codes it screened out', $inventory[0]->fields()['screened'], 1);
+check('the inventory survives the gate', EventQueue::isSafe($inventory[0]->envelope(1), []), true);
 
 /* --------------------------------------------------------------- queue caps */
 

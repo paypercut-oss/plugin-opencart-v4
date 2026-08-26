@@ -289,12 +289,25 @@ final class Event
                 'chunk'        => $index + 1
             ];
 
+            $screened = 0;
+
             foreach ($chunk as $code => $version) {
                 $key = self::text((string)$code);
 
-                if ($key !== '') {
-                    $fields[$key] = self::text((string)$version);
+                // An ordinary code like authorize_net or two_factor_auth
+                // matches DENIED_KEY_PATTERN and would bin the whole chunk:
+                // losing one entry beats losing fourteen and not knowing.
+                if ($key === '' || preg_match(self::DENIED_KEY_PATTERN, $key)) {
+                    $screened++;
+
+                    continue;
                 }
+
+                $fields[$key] = self::text((string)$version);
+            }
+
+            if ($screened > 0) {
+                $fields['screened'] = $screened;
             }
 
             $events[] = new self('environment.plugins', $fields);
@@ -370,10 +383,29 @@ final class Event
         // PHP renders an empty array as [], which the edge reads as "not an
         // object" and records as a drop against an otherwise clean event.
         if (!empty($this->fields)) {
-            $envelope['attrs'] = $this->fields;
+            $envelope['attrs'] = self::boundAttrs($this->fields);
         }
 
         return $envelope;
+    }
+
+    /**
+     * Enforce MAX_ATTRS where the wire actually begins.
+     *
+     * cleanAttrs() bounds what a call site passes, but apiFailure() and
+     * failure() append api_code / trace_id / http_status / origin afterwards.
+     * The edge keeps the first attributes in SORTED KEY ORDER, so the cap is
+     * applied the same way here and both ends drop the same fields.
+     */
+    private static function boundAttrs(array $fields): array
+    {
+        if (count($fields) <= self::MAX_ATTRS) {
+            return $fields;
+        }
+
+        ksort($fields);
+
+        return array_slice($fields, 0, self::MAX_ATTRS, true);
     }
 
     /**
@@ -543,10 +575,13 @@ final class Event
 
     /**
      * Identifier-shaped values only; anything else is dropped, not mangled.
+     *
+     * \z rather than $, which accepts a trailing newline — and a webhook body
+     * is where most of these values come from.
      */
     public static function identifier(string $value): string
     {
-        return preg_match('/^[A-Za-z0-9_.:-]{1,64}$/', $value) ? $value : '';
+        return preg_match('/\A[A-Za-z0-9_.:-]{1,64}\z/', $value) ? $value : '';
     }
 
     /**

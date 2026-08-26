@@ -179,6 +179,11 @@ Paypercut plugin. Likewise every failure carries `origin`
 (`paypercut` / `plugin` / `theme` / `core`) and, for an extension,
 `origin_plugin` — the code from the first stack frame outside our own directory.
 
+An extension code is used as an attribute **key**, and codes like
+`authorize_net` match `DENIED_KEY_PATTERN`. Such a code is dropped from its
+chunk and counted in `screened` rather than being allowed to bin all fourteen
+entries with nothing to say which store lost them.
+
 `payment.closed_unpaid` is deliberately **not** called a failure. Paycore sets
 `status=complete, payment_status=unpaid` on a successful authorisation awaiting
 manual capture, so the state is ambiguous from the store's side. Reporting it as
@@ -246,7 +251,7 @@ any store listing that repeats it.
 | `MAX_QUEUE_BYTES` | 65536 | The same bound in the dimension that actually hurts |
 | `MAX_BATCH_BYTES` | 16384 | Well under the edge's 64 KiB body cap: the edge does not deduplicate, so a bigger batch loses more per failed POST |
 | `MAX_BATCH_EVENTS` | 50 | The edge's own limit — matching it means never provoking an avoidable 413 |
-| `Event::MAX_ATTRS` | 16 | Half the edge's 32; the edge truncates in sorted key order and would take the version fields first |
+| `Event::MAX_ATTRS` | 16 | Half the edge's 32; the edge truncates in sorted key order and would take the version fields first. Enforced in `envelope()`, not only in `cleanAttrs()`, because `apiFailure()` and `failure()` append fields after the call site's attributes are bounded |
 | `SentLog::MAX_ENTRIES` | 100 | The log is a tail, not a transcript, and the panel says so |
 | `SESSION_MAX_SECONDS` | 3600 | With no revocation anywhere, this ceiling **is** the consent |
 
