@@ -119,16 +119,25 @@ check('a spaced PAN drops the event', denied(['note' => 'card 4111 1111 1111 111
 
 // Space and hyphen are not the only way a PAN gets grouped on its way into a
 // log line, and \d never matched the digits that only look like ASCII ones.
-foreach (['.', '/', '_', '|', ',', ':', "\xc2\xa0", "\xe2\x80\x89"] as $separator) {
+foreach (['.', '/', '_', '|', ',', ':', "\t", ', ', '  ', "\xc2\xa0", "\xe2\x80\x89"] as $separator) {
     check(
         'a PAN grouped by ' . bin2hex($separator) . ' drops the event',
         denied(['note' => implode($separator, ['4111', '1111', '1111', '1111'])]),
         true
     );
 }
+check('a mixed-separator PAN drops the event', denied(['note' => '4111 1111-1111.1111']), true);
+check('a PAN behind an order number drops the event', denied(['note' => 'order 42 4111 1111 1111 1111']), true);
 check('a fullwidth PAN drops the event', denied(['note' => '４１１１１１１１１１１１１１１１']), true);
 check('an Arabic-Indic PAN drops the event', denied(['note' => '٤١١١١١١١١١١١١١١١']), true);
 check('a dotted version list is permitted', denied(['note' => '1.2.3.4.5.6.7.8.9.10.11.12.13.14']), false);
+check('a comma-separated order list is permitted', denied(['note' => 'orders 10042, 10043, 10044, 10045 failed']), false);
+check('an address list is permitted', denied(['note' => '192.168.100.254 / 10.0.0.1']), false);
+
+// Compound names glued together are still credentials; extension slugs are not.
+check('a glued secretkey drops the event', denied(['secretkey' => 'x']), true);
+check('a glued accesstoken drops the event', denied(['accesstoken' => 'x']), true);
+check('monkey is permitted', denied(['monkey' => 'x']), false);
 check('a non-Luhn 16-digit id is permitted', denied(['note' => 'transaction 1234567890123456 not found']), false);
 check('a millisecond timestamp is permitted', denied(['note' => 'expired at 1787250271000']), false);
 check('a minor-unit amount is permitted', denied(['note' => 'amount 4250 refused']), false);

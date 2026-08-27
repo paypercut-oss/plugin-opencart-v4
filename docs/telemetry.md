@@ -272,13 +272,14 @@ sees no volume at that length (Maestro at 13/14, JCB's retired 15-digit range).
 Space and hyphen are not the only way a PAN gets grouped on the way into a log
 line, and byte-mode `\d` never matched digits that only look ASCII, so the scan
 first folds fullwidth, Arabic-Indic, Extended Arabic-Indic and Devanagari digits
-(plus the non-breaking spaces) to their ASCII forms, then runs once per
-separator in `Event::PAN_SEPARATORS` — space, hyphen, dot, underscore, slash,
-pipe, comma, colon and ungrouped. One separator at a time, so a run has to be
-uniformly grouped, and a separated run whose interior groups are shorter than
-three digits is not a card rendering at all: that is what keeps
-`1.2.3.4.5.6.7.8.9.10.11.12.13` from reading as a 19-digit candidate. A PAN
-glued into one digit run is caught by the ungrouped pass regardless.
+(plus the non-breaking spaces) to their ASCII forms, then treats any run of up
+to two `Event::PAN_SEPARATOR` characters — space, tab, hyphen, dot, underscore,
+slash, pipe, comma, colon — as a group break. What keeps that from swallowing
+every punctuated number in a log line is the grouping rule: a run whose
+**interior** groups are shorter than three digits is not a card rendering, so
+`1.2.3.4.5.6.7.8.9.10.11.12.13` is not a 19-digit candidate while
+`order 42 4111 1111 1111 1111` still is. The known gap is a PAN written in
+one- or two-digit groups, which no payment form or receipt renders.
 
 The literal-secret screen is position-independent at both ends. The clamp only
 ever cuts a tail, but an error body or a stack frame quotes a slice from the

@@ -84,14 +84,8 @@ final class Event
     const CLAMP_MARGIN = 64;
 
     /**
-     * Group separators a rendered card number may use between its digits.
-     *
-     * Scanned one separator at a time so a run has to be uniformly grouped:
-     * '4111.1111.1111.1111' is a PAN, '1.2.3.4.5.6.7.8.9.10.11.12.13' is a
-     * version string, and a single mixed-punctuation class cannot tell them
-     * apart. '' covers the ungrouped form.
-     */
-    const PAN_SEPARATORS = ['', ' ', '-', '.', '_', '/', '|', ',', ':'];
+    /** Characters that may sit between the digit groups of a rendered PAN. */
+    const PAN_SEPARATOR = '[ \\t\\-._\\/|,:]';
 
     /**
      * Digits and spaces that are not ASCII but render as if they were.
@@ -161,7 +155,7 @@ final class Event
      * likely to BE the conflict support is diagnosing. `auth` therefore has to
      * be the whole name and `nonce` the head noun before either is credential.
      */
-    const DENIED_KEY_PATTERN = '/(?<![a-z0-9])(?:secrets?|passwords?|passwd|pwd|credentials?|tokens?|bearer|authorization|apikey)(?![a-z0-9])|(?:\A|[._-])nonce\z|\Aauth\z|\Akey\z|_key\z/i';
+    const DENIED_KEY_PATTERN = '/(?<![a-z0-9])(?:secrets?|passwords?|passwd|pwd|credentials?|tokens?|bearer|authorization)(?![a-z0-9])|(?<![a-z0-9])(?:api|access|refresh|client|private|public|store|app|secret|auth)(?:key|secret|token|password)s?(?![a-z0-9])|(?:\A|[._-])nonce\z|\Aauth\z|\Akey\z|_key\z/i';
 
     /**
      * Value shapes that must never appear, whatever their field name.
@@ -722,21 +716,17 @@ final class Event
     {
         $value = strtr($value, self::LOOKALIKES);
 
-        foreach (self::PAN_SEPARATORS as $separator) {
-            $gap = $separator === '' ? '' : preg_quote($separator, '/') . '?';
+        if (!preg_match_all('/\d(?:' . self::PAN_SEPARATOR . '{0,2}\d){12,}/', $value, $matches)) {
+            return false;
+        }
 
-            if (!preg_match_all('/\d(?:' . $gap . '\d){12,}/', $value, $matches)) {
+        foreach ($matches[0] as $run) {
+            if (!self::groupedLikeCard($run)) {
                 continue;
             }
 
-            foreach ($matches[0] as $run) {
-                if ($separator !== '' && !self::groupedLikeCard($run, $separator)) {
-                    continue;
-                }
-
-                if (self::runCarriesPan((string)preg_replace('/\D/', '', $run))) {
-                    return true;
-                }
+            if (self::runCarriesPan((string)preg_replace('/\D/', '', $run))) {
+                return true;
             }
         }
 
@@ -744,20 +734,20 @@ final class Event
     }
 
     /**
-     * True when a separated run is grouped the way a card number is.
+     * True when a run of digits is grouped the way a card number is.
      *
      * No rendered PAN carries a group shorter than three digits in the middle
      * of it, whereas '1.2.3.4.5.6.7.8.9.10.11.12.13' does — and concatenated,
-     * that reads as a 19-digit run for the scan to Luhn its way through. A PAN
-     * glued into one digit run is caught by the ungrouped pass regardless.
+     * that reads as a 19-digit run for the scan to Luhn its way through. The
+     * outer groups are exempt: an order number in front of a grouped PAN is
+     * exactly the case the scan slides for.
      */
-    private static function groupedLikeCard(string $run, string $separator): bool
+    private static function groupedLikeCard(string $run): bool
     {
-        $groups = explode($separator, $run);
-        $interior = array_slice($groups, 1, -1);
+        $groups = preg_split('/' . self::PAN_SEPARATOR . '+/', $run);
 
-        foreach ($interior as $group) {
-            if (strlen($group) < 3) {
+        foreach (array_slice((array)$groups, 1, -1) as $group) {
+            if (strlen((string)$group) < 3) {
                 return false;
             }
         }
