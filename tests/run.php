@@ -119,7 +119,8 @@ check('a spaced PAN drops the event', denied(['note' => 'card 4111 1111 1111 111
 
 // Space and hyphen are not the only way a PAN gets grouped on its way into a
 // log line, and \d never matched the digits that only look like ASCII ones.
-foreach (['.', '/', '_', '|', ',', ':', "\t", ', ', '  ', "\xc2\xa0", "\xe2\x80\x89"] as $separator) {
+foreach (['.', '/', '_', '|', ',', ':', "\t", ', ', '  ', "\xc2\xa0", "\xe2\x80\x89",
+    "\xe2\x80\x93", "\xe2\x80\x94", "\xe2\x80\xaf", "\xe2\x88\x92"] as $separator) {
     check(
         'a PAN grouped by ' . bin2hex($separator) . ' drops the event',
         denied(['note' => implode($separator, ['4111', '1111', '1111', '1111'])]),

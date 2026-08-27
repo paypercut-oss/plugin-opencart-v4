@@ -103,7 +103,14 @@ final class Event
         '०' => '0', '१' => '1', '२' => '2', '३' => '3', '४' => '4',
         '५' => '5', '६' => '6', '७' => '7', '८' => '8', '९' => '9',
         "\xc2\xa0" => ' ', "\xe2\x80\x87" => ' ', "\xe2\x80\x89" => ' ',
-        "\xe2\x80\xaf" => ' ', "\xe2\x80\x88" => ' ', "\xe3\x80\x80" => ' '
+        "\xe2\x80\xaf" => ' ', "\xe2\x80\x88" => ' ', "\xe3\x80\x80" => ' ',
+        "\xe2\x80\x8b" => ' ', "\xe2\x81\xa0" => ' ', "\xef\xbb\xbf" => ' ',
+        // Dashes as well as spaces: a card grouped with an en dash survived the
+        // scan intact, because a separator wider than one byte ends the run and
+        // each four-digit group is then screened on its own.
+        "\xc2\xad" => ' ', "\xe2\x80\x90" => ' ', "\xe2\x80\x91" => ' ',
+        "\xe2\x80\x92" => ' ', "\xe2\x80\x93" => ' ', "\xe2\x80\x94" => ' ',
+        "\xe2\x80\x95" => ' ', "\xe2\x88\x92" => ' ', "\xef\xbc\x8d" => ' '
     ];
 
     /**
