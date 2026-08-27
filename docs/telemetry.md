@@ -226,6 +226,19 @@ behind by the 256-byte clamp), and two levels of recursion. It drops the
 assertion means the event was assembled wrongly, so the rest of it cannot be
 trusted either.
 
+Three things the gate deliberately does not assume:
+
+- **Every scalar is screened, not only strings.** An int attribute is
+  serialised verbatim by the edge, and sixteen digits are sixteen digits
+  whether they arrive quoted or not.
+- **Nesting past `Event::MAX_DEPTH` is denied, not skipped.** An envelope
+  shaped in a way the contract does not describe is one nobody screened.
+- **The clamp screens before it cuts.** `Event::text()` truncates to 256 bytes,
+  and a cut through the middle of a card number leaves a run the Luhn check no
+  longer recognises — so a value carrying a PAN is replaced with
+  `Event::CLAMPED_DENIED`, which the gate denies, rather than clamped into
+  something that passes.
+
 Screening the correlation ids is not optional. `payment_id` and `order_ref` are
 copied straight out of a webhook body, and a store with no webhook secret
 configured accepts unsigned deliveries — so those ids are an unauthenticated

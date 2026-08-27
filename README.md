@@ -62,8 +62,9 @@ Four things not to change without reading that document first:
   looks exactly like a forgery.
 - **The deny assertion.** `EventQueue::append()` screens the **whole envelope**
   as it will be serialised — correlation ids included, because those are copied
-  out of webhook bodies — and drops the **whole event**, never just the
-  offending field.
+  out of webhook bodies — every scalar at every depth, and drops the **whole
+  event**, never just the offending field. The 256-byte clamp screens before it
+  cuts, so a truncated card number cannot slip past the Luhn check.
 - **Upstream text.** Neither `Event::apiFailure()` nor `Event::failure()` sends
   an upstream error message: the API quotes a rejected key back inside it, and
   OpenCart's database adapter puts the SQL and the database user@host inside it.

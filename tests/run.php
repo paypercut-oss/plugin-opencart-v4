@@ -181,7 +181,9 @@ $poisons = [
     'a spaced PAN'              => '4111 1111 1111 1111',
     'a credential shape'        => 'rejected ppc_live_store_secret',
     'the literal API key'       => 'call failed for ' . $opaque,
-    'an API key cut by a clamp' => str_repeat('x', 245) . substr($opaque, 0, 11)
+    'an API key cut by a clamp' => str_repeat('x', 245) . substr($opaque, 0, 11),
+    'a PAN cut by a clamp'      => Event::text(str_repeat('z', 250) . '4111111111111111'),
+    'a PAN sent as an int'      => 4111111111111111
 ];
 
 foreach (array_keys($maximal) as $field) {
@@ -192,6 +194,29 @@ foreach (array_keys($maximal) as $field) {
         check($label . ' in ' . $field . ' drops the event', EventQueue::isSafe($envelope, $store_secrets), false);
     }
 }
+
+// The regression that matters: screening is driven by the envelope itself, not
+// by a list of field names, so a field added tomorrow is screened on arrival.
+foreach ($poisons as $label => $poison) {
+    check(
+        $label . ' in a field nobody has added yet drops the event',
+        EventQueue::isSafe(array_merge($maximal, ['field_added_tomorrow' => $poison]), $store_secrets),
+        false
+    );
+}
+
+// Nesting the contract does not have is an envelope nobody screened; the
+// assertion denies it rather than walking past what it cannot reach.
+check(
+    'nesting deeper than the contract drops the event',
+    EventQueue::isSafe(['event' => 'x', 'error' => ['stack' => ['frames' => ['ppc_live_leak']]]], []),
+    false
+);
+
+// A clamp through the middle of a PAN leaves a run Luhn no longer recognises.
+check('a clamped PAN never reaches the wire', Event::text(str_repeat('z', 250) . '4111111111111111'), Event::CLAMPED_DENIED);
+check('the clamp marker is denied by the gate', Event::isDenied(['attrs' => ['note' => Event::CLAMPED_DENIED]]), true);
+check('an ordinary clamp is untouched', strlen(Event::text(str_repeat('z', 300))), Event::MAX_TEXT_BYTES);
 
 /* --------------------------------------------------- named constructors only */
 

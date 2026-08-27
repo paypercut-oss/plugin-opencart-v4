@@ -55,6 +55,22 @@ final class Event
      */
     const MIN_SECRET_FRAGMENT = 8;
 
+    /**
+     * Deepest nesting the wire contract has: error, and error.stack inside it.
+     *
+     * Anything below that is an envelope nobody designed, so the assertion
+     * denies it rather than walking past what it cannot screen.
+     */
+    const MAX_DEPTH = 2;
+
+    /**
+     * Stands in for a value whose clamped tail cut a card number in half.
+     *
+     * A partial PAN still passes containsCardNumber(), so the clamp has to hand
+     * the gate something it will deny — this matches DENIED_VALUE_PATTERN.
+     */
+    const CLAMPED_DENIED = 'ppc_clamped_denied';
+
     /** Field names that must never appear, whatever their value. */
     const DENIED_KEY_PATTERN = '/secret|token|password|credential|nonce|auth|_key$/i';
 
@@ -474,14 +490,26 @@ final class Event
             // Without recursion the assertion sees a non-string and gives up,
             // which is exactly where free text now lives.
             if (is_array($value)) {
-                if ($depth < 2 && self::isDenied($value, $secrets, $depth + 1)) {
+                if ($depth >= self::MAX_DEPTH) {
+                    return true;
+                }
+
+                if (self::isDenied($value, $secrets, $depth + 1)) {
                     return true;
                 }
 
                 continue;
             }
 
-            if (!is_string($value) || $value === '') {
+            if (!is_scalar($value)) {
+                continue;
+            }
+
+            // Cast rather than require a string: an int attribute is a scalar
+            // the edge serialises verbatim, and 16 digits are 16 digits.
+            $value = (string)$value;
+
+            if ($value === '') {
                 continue;
             }
 
@@ -564,6 +592,17 @@ final class Event
         if ($clean === '' && $value !== '') {
             // Invalid UTF-8 made the unicode-mode replace fail; fall back to ASCII.
             $clean = (string)preg_replace('/[^\x20-\x7E]/', '', $value);
+        }
+
+        if (strlen($clean) <= self::MAX_TEXT_BYTES) {
+            return $clean;
+        }
+
+        // Screened BEFORE the cut, not after: a clamp through the middle of a
+        // card number leaves a run the Luhn check no longer recognises, so the
+        // gate would pass twelve digits of PAN it would have denied intact.
+        if (self::containsCardNumber($clean)) {
+            return self::CLAMPED_DENIED;
         }
 
         // mb_strcut cuts on a byte budget while respecting codepoint
