@@ -93,9 +93,10 @@ php tests/run.php        # environment pairing, privacy contract, queue, flusher
 php tests/catalogue.php  # every emitted event name is documented
 ```
 
-Both are plain PHP with no OpenCart bootstrap and no dependencies. There is no
-wider automated suite; anything outside the telemetry library is smoke-tested by
-hand on the hosted dev store.
+Both are plain PHP with no OpenCart bootstrap and no dependencies. CI
+(`.github/workflows/tests.yml`) lints every PHP file and runs `tests/run.php` on
+each push and pull request. There is no wider automated suite; anything outside
+the telemetry library is smoke-tested by hand on the hosted dev store.
 
 ## Dev store
 
