@@ -220,21 +220,29 @@ A message the module authored itself is the diagnosis and stays: that is what
 will be serialised** — `attrs`, `error` (including `error.stack`) and the
 correlation ids `about()` writes as top-level siblings — against five rules:
 denied key names, credential value shapes, a sliding Luhn PAN scan, a literal
-comparison against the store's actual secrets (including a head of one left
-behind by the 256-byte clamp), and two levels of recursion. It drops the
+comparison against the store's actual secrets (any fragment of one, wherever it
+sits in the value), and two levels of recursion. It drops the
 **whole event** rather than the offending field: a field that trips the
 assertion means the event was assembled wrongly, so the rest of it cannot be
 trusted either.
 
-Four things the gate deliberately does not assume:
+Five things the gate deliberately does not assume:
 
-- **Every scalar is screened, not only strings.** An int attribute is
-  serialised verbatim by the edge, and sixteen digits are sixteen digits
-  whether they arrive quoted or not.
+- **Every scalar is screened, in every form it can reach the wire as.** Not
+  only strings, and not the `(string)` cast alone: the cast renders under
+  `precision` and the encoder under `serialize_precision`, so
+  `(string)4111111111111111.0` is `4.1111111111111E+15` while `json_encode`
+  emits the digits. `Event::wireRenderings()` hands the screens every form, or
+  a float attribute would carry a full PAN past a gate that never saw one.
 - **Keys are screened as values, not only as names.** A key is serialised
   exactly as a value is, so `Event::deniedValue()` runs over both. The name
   regex alone would pass a PAN or an `sk_live_` token in key position, and
   `environment.plugins` puts merchant-controlled extension codes there.
+- **The name regex matches segments, not substrings.** Those extension codes
+  are keys too. A bare `auth` substring screened `payment.authorizenet_aim` and
+  `ocmod.two_factor_auth` out of the inventory — the entries most likely to be
+  the conflict support is diagnosing — so `auth` must be the whole name and
+  `nonce` the head noun before either counts as a credential.
 - **Nesting past `Event::MAX_DEPTH` is denied, not skipped.** An envelope
   shaped in a way the contract does not describe is one nobody screened.
 - **The clamp screens before it cuts.** `Event::text()` truncates to 256 bytes,
@@ -248,17 +256,49 @@ The PAN scan slides. Anchoring a candidate to the start of a digit run let a
 card number through with anything at all stuck in front of it, so every 13-19
 digit window is Luhn-tested. Luhn alone is not a discriminator at that point —
 some window inside a random 16-digit id passes it about two thirds of the time
-— so a candidate must also match the issuer prefix for its length
-(`Event::PAN_PREFIXES`). A numeric order or transaction reference still travels.
+— so a candidate must also match an issuer prefix for its length. There are two
+tables, and the split is what keeps a merchant's order numbers on the wire:
+`Event::PAN_PREFIXES` covers every range assigned at that length and applies
+when the candidate **is** the whole digit run, which is the shape a leak
+overwhelmingly takes; `Event::EMBEDDED_PAN_PREFIXES` is tighter and applies to a
+candidate slid out of a **longer** run, because a 16-digit order number offers
+ten such windows and every prefix digit admitted there costs ten windows' worth
+of false denials. Measured over 3,000 random digit runs: **8.9% of 16-digit,
+3.1% of 13-digit, 30.7% of 19-digit** are denied — down from 20.5% / 3.1% /
+51.2% when both tables were one loose MII range. The known gap the split buys is
+a 13-, 14- or 15-digit card glued inside a longer digit run under a prefix that
+sees no volume at that length (Maestro at 13/14, JCB's retired 15-digit range).
+
+Space and hyphen are not the only way a PAN gets grouped on the way into a log
+line, and byte-mode `\d` never matched digits that only look ASCII, so the scan
+first folds fullwidth, Arabic-Indic, Extended Arabic-Indic and Devanagari digits
+(plus the non-breaking spaces) to their ASCII forms, then runs once per
+separator in `Event::PAN_SEPARATORS` — space, hyphen, dot, underscore, slash,
+pipe, comma, colon and ungrouped. One separator at a time, so a run has to be
+uniformly grouped, and a separated run whose interior groups are shorter than
+three digits is not a card rendering at all: that is what keeps
+`1.2.3.4.5.6.7.8.9.10.11.12.13` from reading as a 19-digit candidate. A PAN
+glued into one digit run is caught by the ungrouped pass regardless.
+
+The literal-secret screen is position-independent at both ends. The clamp only
+ever cuts a tail, but an error body or a stack frame quotes a slice from the
+middle of a credential, so `Event::deniedValue()` looks for **any** run of
+`Event::MIN_SECRET_FRAGMENT` bytes of a store credential anywhere in the value,
+not just a head the value happens to end on.
 
 Screening the correlation ids is not optional. `payment_id` and `order_ref` are
 copied straight out of a webhook body, and a store with no webhook secret
 configured accepts unsigned deliveries — so those ids are an unauthenticated
 caller's to write. `about()` therefore bounds all three with
 `Event::identifier()`, not `Event::text()`: a value that is not identifier-
-shaped is dropped rather than clamped to 256 bytes of arbitrary text. Nothing
-real is lost — an OpenCart order reference is the numeric order id and a
-Paypercut id is a prefixed ULID. `tests/run.php` pins this by poisoning
+shaped is dropped rather than clamped to 256 bytes of arbitrary text, and a
+value made only of the punctuation that charset allows (`..`, `--`) is dropped
+too: it joins nothing to anything and is the one shape left that reads as a
+path. Nothing real is lost — an OpenCart order reference is `(string)$order_id`,
+the numeric order id, and a Paypercut id is a prefixed ULID. Note the deliberate
+asymmetry with the rest of the gate: a bad correlation id drops the **field**
+and still ships the event, where bad attributes or error text drop the whole
+event. `tests/run.php` pins this by poisoning
 **every** field of a maximal envelope in turn, in key position as well as value
 position, and fails if a field is added to `Event::envelope()` without a
 decision about screening it.

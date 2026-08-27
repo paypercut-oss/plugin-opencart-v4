@@ -37,20 +37,42 @@ final class Event
     const MAX_PAN_DIGITS = 19;
 
     /**
-     * Issuer prefixes a card of each length may start with, per ISO/IEC 7812.
+     * Issuer prefixes a card of each length may start with.
      *
      * The scan slides, so Luhn alone is not a discriminator: some window inside
-     * a random 16-digit id passes it about two thirds of the time. A candidate
-     * has to be shaped like a card of that length as well.
+     * a random 16-digit id passes it about two thirds of the time. Ranges are
+     * the ones actually issued at that length (Visa/Mastercard/Amex/Diners/
+     * Discover/JCB/UnionPay/Maestro), not the whole of MII 2-6: every prefix
+     * digit admitted is telemetry lost on merchants whose order numbers are
+     * long digit runs.
      */
     const PAN_PREFIXES = [
         13 => '/\\A[456]/',
-        14 => '/\\A(3(0[0-5]|095|6|8|9)|6)/',
-        15 => '/\\A(3[47]|2131|1800)/',
-        16 => '/\\A[2-6]/',
-        17 => '/\\A[3-6]/',
-        18 => '/\\A[3-6]/',
-        19 => '/\\A[3-6]/'
+        14 => '/\\A(30[0-5]|3095|3[689]|[56])/',
+        15 => '/\\A(3[47]|2131|1800|[56])/',
+        16 => '/\\A(4|5|6|2(2(2[1-9]|[3-9]\\d)|[3-6]\\d\\d|7([01]\\d|20))|35(2[89]|[3-8]\\d))/',
+        17 => '/\\A[56]/',
+        18 => '/\\A[56]/',
+        19 => '/\\A[456]/'
+    ];
+
+    /**
+     * Prefixes a candidate must match when it was SLID out of a longer run.
+     *
+     * Every extra prefix digit admitted here costs ten sliding windows' worth
+     * of false denials, because a 16-digit order number offers ten of them. So
+     * an embedded candidate has to be one of the ranges that actually carry
+     * volume at that length; a bare PAN — the shape a leak overwhelmingly takes
+     * — is the whole run and gets the full table above.
+     */
+    const EMBEDDED_PAN_PREFIXES = [
+        13 => '/\\A4/',
+        14 => '/\\A(30[0-5]|3095|3[689])/',
+        15 => '/\\A3[47]/',
+        16 => '/\\A(4|5|6|2(2(2[1-9]|[3-9]\\d)|[3-6]\\d\\d|7([01]\\d|20))|35(2[89]|[3-8]\\d))/',
+        17 => '/\\A[56]/',
+        18 => '/\\A[56]/',
+        19 => '/\\A[456]/'
     ];
 
     /**
@@ -60,6 +82,35 @@ final class Event
      * megabyte of attacker-supplied text costs a fixed amount of scanning.
      */
     const CLAMP_MARGIN = 64;
+
+    /**
+     * Group separators a rendered card number may use between its digits.
+     *
+     * Scanned one separator at a time so a run has to be uniformly grouped:
+     * '4111.1111.1111.1111' is a PAN, '1.2.3.4.5.6.7.8.9.10.11.12.13' is a
+     * version string, and a single mixed-punctuation class cannot tell them
+     * apart. '' covers the ungrouped form.
+     */
+    const PAN_SEPARATORS = ['', ' ', '-', '.', '_', '/', '|', ',', ':'];
+
+    /**
+     * Digits and spaces that are not ASCII but render as if they were.
+     *
+     * \d is byte-mode here, so a fullwidth or Arabic-Indic PAN would sail past
+     * the scan and land on the wire looking exactly like a card number.
+     */
+    const LOOKALIKES = [
+        '０' => '0', '１' => '1', '２' => '2', '３' => '3', '４' => '4',
+        '５' => '5', '６' => '6', '７' => '7', '８' => '8', '９' => '9',
+        '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
+        '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+        '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
+        '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+        '०' => '0', '१' => '1', '२' => '2', '३' => '3', '४' => '4',
+        '५' => '5', '६' => '6', '७' => '7', '८' => '8', '९' => '9',
+        "\xc2\xa0" => ' ', "\xe2\x80\x87" => ' ', "\xe2\x80\x89" => ' ',
+        "\xe2\x80\xaf" => ' ', "\xe2\x80\x88" => ' ', "\xe3\x80\x80" => ' '
+    ];
 
     /**
      * Uncaught throwables whose message PHP itself wrote.
@@ -101,8 +152,16 @@ final class Event
      */
     const CLAMPED_DENIED = 'ppc_clamped_denied';
 
-    /** Field names that must never appear, whatever their value. */
-    const DENIED_KEY_PATTERN = '/secret|token|password|credential|nonce|auth|_key$/i';
+    /**
+     * Field names that must never appear, whatever their value.
+     *
+     * Anchored to whole name segments, not substrings. The extension inventory
+     * puts real slugs in key position, and a bare `auth` substring screens
+     * authorizenet_aim and two_factor_auth out of it — the two entries most
+     * likely to BE the conflict support is diagnosing. `auth` therefore has to
+     * be the whole name and `nonce` the head noun before either is credential.
+     */
+    const DENIED_KEY_PATTERN = '/(?<![a-z0-9])(?:secrets?|passwords?|passwd|pwd|credentials?|tokens?|bearer|authorization|apikey)(?![a-z0-9])|(?:\A|[._-])nonce\z|\Aauth\z|\Akey\z|_key\z/i';
 
     /**
      * Value shapes that must never appear, whatever their field name.
@@ -547,14 +606,49 @@ final class Event
                 continue;
             }
 
-            // Cast rather than require a string: an int attribute is a scalar
-            // the edge serialises verbatim, and 16 digits are 16 digits.
-            if (self::deniedValue((string)$value, $secrets)) {
-                return true;
+            // Screen every form, not the (string) cast alone: the cast and the
+            // encoder disagree on floats, so one of them screens a string the
+            // wire never sends.
+            foreach (self::wireRenderings($value) as $rendered) {
+                if (self::deniedValue($rendered, $secrets)) {
+                    return true;
+                }
             }
         }
 
         return false;
+    }
+
+    /**
+     * Every textual form one scalar can reach the wire as.
+     *
+     * (string)4111111111111111.0 is '4.1111111111111E+15' under `precision`
+     * while json_encode emits the digits under `serialize_precision`: screening
+     * the cast alone leaves a full PAN on the wire as a float attribute.
+     *
+     * @param bool|float|int|string $value
+     */
+    private static function wireRenderings($value): array
+    {
+        if (is_string($value)) {
+            return [$value];
+        }
+
+        if (is_bool($value)) {
+            return [$value ? 'true' : 'false'];
+        }
+
+        if (!is_float($value)) {
+            return [(string)$value];
+        }
+
+        $renderings = [(string)$value, (string)json_encode($value)];
+
+        if (is_finite($value)) {
+            $renderings[] = rtrim(rtrim(sprintf('%.6F', $value), '0'), '.');
+        }
+
+        return $renderings;
     }
 
     /**
@@ -585,7 +679,7 @@ final class Event
                 continue;
             }
 
-            if (strpos($value, $secret) !== false || self::endsWithSecretHead($value, $secret)) {
+            if (self::carriesSecretFragment($value, $secret)) {
                 return true;
             }
         }
@@ -594,17 +688,22 @@ final class Event
     }
 
     /**
-     * True when the value ends in the head of a credential.
+     * True when the value carries any run of a credential worth recovering.
      *
-     * Clamping only ever removes the tail, so a truncated secret survives as a
-     * suffix of the value and the whole-string comparison above misses it.
+     * Position-independent at BOTH ends: clamping cuts the tail, but an error
+     * body or a stack frame quotes a slice from the middle, and a comparison
+     * anchored to the credential's head never sees it.
      */
-    private static function endsWithSecretHead(string $value, string $secret): bool
+    private static function carriesSecretFragment(string $value, string $secret): bool
     {
-        $longest = min(strlen($value), strlen($secret) - 1);
+        $length = strlen($secret);
 
-        for ($length = $longest; $length >= self::MIN_SECRET_FRAGMENT; $length--) {
-            if (strncmp($secret, substr($value, -$length), $length) === 0) {
+        if ($length <= self::MIN_SECRET_FRAGMENT) {
+            return strpos($value, $secret) !== false;
+        }
+
+        for ($start = 0; $start + self::MIN_SECRET_FRAGMENT <= $length; $start++) {
+            if (strpos($value, substr($secret, $start, self::MIN_SECRET_FRAGMENT)) !== false) {
                 return true;
             }
         }
@@ -621,27 +720,75 @@ final class Event
      */
     public static function containsCardNumber(string $value): bool
     {
-        if (!preg_match_all('/\d(?:[ -]?\d){12,}/', $value, $matches)) {
-            return false;
+        $value = strtr($value, self::LOOKALIKES);
+
+        foreach (self::PAN_SEPARATORS as $separator) {
+            $gap = $separator === '' ? '' : preg_quote($separator, '/') . '?';
+
+            if (!preg_match_all('/\d(?:' . $gap . '\d){12,}/', $value, $matches)) {
+                continue;
+            }
+
+            foreach ($matches[0] as $run) {
+                if ($separator !== '' && !self::groupedLikeCard($run, $separator)) {
+                    continue;
+                }
+
+                if (self::runCarriesPan((string)preg_replace('/\D/', '', $run))) {
+                    return true;
+                }
+            }
         }
 
-        foreach ($matches[0] as $run) {
-            $digits = (string)preg_replace('/\D/', '', $run);
-            $length = strlen($digits);
+        return false;
+    }
 
-            // Slide, rather than anchor the candidate to the run: a PAN with an
-            // order number stuck to the front of it is still a PAN.
-            for ($start = 0; $start + self::MIN_PAN_DIGITS <= $length; $start++) {
-                foreach (self::PAN_PREFIXES as $take => $prefix) {
-                    if ($start + $take > $length) {
-                        break;
-                    }
+    /**
+     * True when a separated run is grouped the way a card number is.
+     *
+     * No rendered PAN carries a group shorter than three digits in the middle
+     * of it, whereas '1.2.3.4.5.6.7.8.9.10.11.12.13' does — and concatenated,
+     * that reads as a 19-digit run for the scan to Luhn its way through. A PAN
+     * glued into one digit run is caught by the ungrouped pass regardless.
+     */
+    private static function groupedLikeCard(string $run, string $separator): bool
+    {
+        $groups = explode($separator, $run);
+        $interior = array_slice($groups, 1, -1);
 
-                    $candidate = substr($digits, $start, $take);
+        foreach ($interior as $group) {
+            if (strlen($group) < 3) {
+                return false;
+            }
+        }
 
-                    if (preg_match($prefix, $candidate) && self::luhnValid($candidate)) {
-                        return true;
-                    }
+        return true;
+    }
+
+    /**
+     * A card number at any offset inside one run of digits.
+     *
+     * Slides, rather than anchoring the candidate to the run: a PAN with an
+     * order number stuck to the front of it is still a PAN.
+     */
+    private static function runCarriesPan(string $digits): bool
+    {
+        $length = strlen($digits);
+
+        for ($start = 0; $start + self::MIN_PAN_DIGITS <= $length; $start++) {
+            foreach (self::PAN_PREFIXES as $take => $prefix) {
+                if ($start + $take > $length) {
+                    break;
+                }
+
+                if ($start !== 0 || $take !== $length) {
+                    $prefix = self::EMBEDDED_PAN_PREFIXES[$take];
+                }
+
+                $candidate = substr($digits, $start, $take);
+
+                if (preg_match($prefix, $candidate) && self::luhnValid($candidate)) {
+                    return true;
                 }
             }
         }
@@ -691,7 +838,13 @@ final class Event
      */
     public static function identifier(string $value): string
     {
-        return preg_match('/\A[A-Za-z0-9_.:-]{1,64}\z/', $value) ? $value : '';
+        if (!preg_match('/\A[A-Za-z0-9_.:-]{1,64}\z/', $value)) {
+            return '';
+        }
+
+        // Punctuation alone ('..', '--') joins nothing to anything and is the
+        // only shape left in this charset that reads as a path, not an id.
+        return preg_match('/[A-Za-z0-9]/', $value) ? $value : '';
     }
 
     /**

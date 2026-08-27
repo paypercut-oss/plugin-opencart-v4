@@ -98,6 +98,15 @@ check('an _key suffix drops the event', denied(['api_key' => 'x']), true);
 check('a nonce drops the event', denied(['nonce' => 'x']), true);
 check('an authorization key drops the event', denied(['authorization' => 'x']), true);
 check('a password drops the event', denied(['password' => 'x']), true);
+check('a bare auth key drops the event', denied(['auth' => 'x']), true);
+
+// The key screen matches name segments, not substrings: extension slugs are
+// keys too, and a substring match costs the inventory its auth extensions.
+check('an authorizenet slug is permitted', denied(['payment.authorizenet_aim' => '3.0']), false);
+check('a two_factor_auth slug is permitted', denied(['ocmod.two_factor_auth' => '1.2']), false);
+check('a nonce_shield slug is permitted', denied(['ocmod.nonce_shield' => '2.1']), false);
+check('an author key is permitted', denied(['theme_author' => 'acme']), false);
+check('a keyword key is permitted', denied(['keyword' => 'checkout']), false);
 
 check('a credential shape mid-string drops the event', denied(['note' => 'rejected ppc_live_store_secret']), true);
 check('a JWT shape drops the event', denied(['note' => 'token eyJhbGciOiJSUzI1NiJ9.body']), true);
@@ -107,6 +116,19 @@ check('backpack_pk_none is permitted', denied(['note' => 'backpack_pk_none missi
 
 check('a PAN mid-string drops the event', denied(['note' => 'Card 4111111111111111 was declined']), true);
 check('a spaced PAN drops the event', denied(['note' => 'card 4111 1111 1111 1111 declined']), true);
+
+// Space and hyphen are not the only way a PAN gets grouped on its way into a
+// log line, and \d never matched the digits that only look like ASCII ones.
+foreach (['.', '/', '_', '|', ',', ':', "\xc2\xa0", "\xe2\x80\x89"] as $separator) {
+    check(
+        'a PAN grouped by ' . bin2hex($separator) . ' drops the event',
+        denied(['note' => implode($separator, ['4111', '1111', '1111', '1111'])]),
+        true
+    );
+}
+check('a fullwidth PAN drops the event', denied(['note' => '４１１１１１１１１１１１１１１１']), true);
+check('an Arabic-Indic PAN drops the event', denied(['note' => '٤١١١١١١١١١١١١١١١']), true);
+check('a dotted version list is permitted', denied(['note' => '1.2.3.4.5.6.7.8.9.10.11.12.13.14']), false);
 check('a non-Luhn 16-digit id is permitted', denied(['note' => 'transaction 1234567890123456 not found']), false);
 check('a millisecond timestamp is permitted', denied(['note' => 'expired at 1787250271000']), false);
 check('a minor-unit amount is permitted', denied(['note' => 'amount 4250 refused']), false);
@@ -127,6 +149,21 @@ check('a Luhn-valid run that is not card-shaped is permitted', denied(['note' =>
 check('the literal API key drops the event', denied(['note' => 'call failed for sk_live_realstorekey'], $secrets), true);
 check('the literal webhook secret drops the event', denied(['note' => 'whsec_realwebhooksecret'], $secrets), true);
 check('an empty secret does not match everything', Event::isDenied(['attrs' => ['note' => 'fine']], ['']), false);
+
+// The clamp cuts the tail, but an error body quotes from the middle: a match
+// anchored to either end of the credential misses the slice that matters.
+check('a credential head drops the event', denied(['note' => 'key sk_live_re'], $secrets), true);
+check('a credential middle drops the event', denied(['note' => 'key ive_realsto rejected'], $secrets), true);
+check('a credential tail drops the event', denied(['note' => 'ends _realstorekey'], $secrets), true);
+check('a seven-character slice is still permitted', denied(['note' => 'ive_rea'], $secrets), false);
+
+// A float attribute is stringified by `precision` and serialised by
+// `serialize_precision`; screening only the cast leaves the digits on the wire.
+check('an integer PAN drops the event', denied(['note' => 4111111111111111]), true);
+check('a float PAN drops the event', denied(['note' => 4111111111111111.0]), true);
+check('a float Amex PAN drops the event', denied(['note' => 371449635398431.0]), true);
+check('a float duration is permitted', denied(['note' => 342.5]), false);
+check('a true boolean is permitted', denied(['note' => true]), false);
 
 // `error` is a top-level sibling of `attrs`: if it is not screened explicitly
 // it bypasses the one gate every producer funnels through.
@@ -363,6 +400,10 @@ check('an email is dropped, not mangled', Event::identifier('jane@example.com'),
 check('an address is dropped', Event::identifier('12 Sunset Road'), '');
 check('an over-long identifier is dropped', Event::identifier(str_repeat('a', 65)), '');
 check('a trailing newline is not identifier-shaped', Event::identifier("charge.succeeded\n"), '');
+check('a bare order id passes through', Event::identifier('10042'), '10042');
+check('a prefixed ULID passes through', Event::identifier('pi_01KB23MA6A5B8M4PJ9XQ7K2ABC'), 'pi_01KB23MA6A5B8M4PJ9XQ7K2ABC');
+check('a traversal is dropped', Event::identifier('../../etc/passwd'), '');
+check('punctuation alone is dropped', Event::identifier('..'), '');
 
 /* ------------------------------------------------------------------ envelope */
 
@@ -410,17 +451,24 @@ $wide = Event::apiFailure('api.request_failed', 401, ['error' => ['code' => 'tok
 check('the envelope enforces MAX_ATTRS', count($wide['attrs']), Event::MAX_ATTRS);
 check('the envelope caps in sorted key order, as the edge does', array_key_first($wide['attrs']), 'api_code');
 
-// A code like authorize_net matches DENIED_KEY_PATTERN and would otherwise cost
-// the whole 14-extension chunk, silently and with nothing to say which store.
+// Real extension slugs sit in key position, so the key screen has to be
+// segment-anchored: a bare 'auth' substring costs support the very entries most
+// likely to be the conflict. A genuinely credential-shaped code still goes.
 $inventory = Event::environmentPlugins([
-    'authorize_net' => '1.0.0',
-    'paypercut'     => '1.0.5',
-    'ocmod_theme'   => '2.1'
+    'payment.authorizenet_aim' => '3.0',
+    'ocmod.nonce_shield'       => '2.1',
+    'ocmod.two_factor_auth'    => '1.2',
+    'payment.api_secret'       => '1.0.0',
+    'paypercut'                => '1.0.5',
+    'ocmod_theme'              => '2.1'
 ]);
 
 check('a denied-shaped code does not bin the inventory', array_keys($inventory[0]->fields()), [
     'plugin_count',
     'chunk',
+    'payment.authorizenet_aim',
+    'ocmod.nonce_shield',
+    'ocmod.two_factor_auth',
     'paypercut',
     'ocmod_theme',
     'screened'
