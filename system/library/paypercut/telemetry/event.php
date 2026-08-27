@@ -31,6 +31,36 @@ final class Event
 
     const MAX_STACK_FRAMES = 8;
 
+    /** Card number lengths the Luhn scan considers, per ISO/IEC 7812. */
+    const MIN_PAN_DIGITS = 13;
+
+    const MAX_PAN_DIGITS = 19;
+
+    /**
+     * Issuer prefixes a card of each length may start with, per ISO/IEC 7812.
+     *
+     * The scan slides, so Luhn alone is not a discriminator: some window inside
+     * a random 16-digit id passes it about two thirds of the time. A candidate
+     * has to be shaped like a card of that length as well.
+     */
+    const PAN_PREFIXES = [
+        13 => '/\\A[456]/',
+        14 => '/\\A(3(0[0-5]|095|6|8|9)|6)/',
+        15 => '/\\A(3[47]|2131|1800)/',
+        16 => '/\\A[2-6]/',
+        17 => '/\\A[3-6]/',
+        18 => '/\\A[3-6]/',
+        19 => '/\\A[3-6]/'
+    ];
+
+    /**
+     * How far past the clamp the pre-clamp screen looks.
+     *
+     * Enough to see a PAN or a credential straddling the cut; bounded so that a
+     * megabyte of attacker-supplied text costs a fixed amount of scanning.
+     */
+    const CLAMP_MARGIN = 64;
+
     /**
      * Uncaught throwables whose message PHP itself wrote.
      *
@@ -313,7 +343,7 @@ final class Event
                 // An ordinary code like authorize_net or two_factor_auth
                 // matches DENIED_KEY_PATTERN and would bin the whole chunk:
                 // losing one entry beats losing fourteen and not knowing.
-                if ($key === '' || preg_match(self::DENIED_KEY_PATTERN, $key)) {
+                if ($key === '' || preg_match(self::DENIED_KEY_PATTERN, $key) || self::deniedValue($key, self::storeSecrets())) {
                     $screened++;
 
                     continue;
@@ -338,10 +368,14 @@ final class Event
     public function about(array $correlation): self
     {
         foreach (['payment_intent_id', 'payment_id', 'order_ref'] as $field) {
-            $value = trim((string)($correlation[$field] ?? ''));
+            // identifier(), not text(): these three are copied straight out of
+            // a webhook body, which on a store with no webhook secret is
+            // anybody's to write. An OpenCart order ref is the numeric order id
+            // and a Paypercut id is a prefixed ULID, so nothing real is lost.
+            $value = self::identifier(trim((string)($correlation[$field] ?? '')));
 
             if ($value !== '') {
-                $this->correlation[$field] = self::text($value);
+                $this->correlation[$field] = $value;
             }
         }
 
@@ -482,7 +516,15 @@ final class Event
     public static function isDenied(array $fields, array $secrets = [], int $depth = 0): bool
     {
         foreach ($fields as $key => $value) {
-            if (preg_match(self::DENIED_KEY_PATTERN, (string)$key)) {
+            $name = (string)$key;
+
+            if (preg_match(self::DENIED_KEY_PATTERN, $name)) {
+                return true;
+            }
+
+            // A key is serialised exactly as a value is, so it gets the same
+            // screens: a PAN or a credential in key position is still on the wire.
+            if (self::deniedValue($name, $secrets)) {
                 return true;
             }
 
@@ -507,31 +549,44 @@ final class Event
 
             // Cast rather than require a string: an int attribute is a scalar
             // the edge serialises verbatim, and 16 digits are 16 digits.
-            $value = (string)$value;
+            if (self::deniedValue((string)$value, $secrets)) {
+                return true;
+            }
+        }
 
-            if ($value === '') {
+        return false;
+    }
+
+    /**
+     * Every value screen, applied to one scalar.
+     *
+     * One function so that the gate, the key screen and the pre-clamp screen in
+     * text() cannot drift apart: whatever any of them denies, all of them deny.
+     */
+    public static function deniedValue(string $value, array $secrets = []): bool
+    {
+        if ($value === '') {
+            return false;
+        }
+
+        if (preg_match(self::DENIED_VALUE_PATTERN, $value)) {
+            return true;
+        }
+
+        if (self::containsCardNumber($value)) {
+            return true;
+        }
+
+        // Shape matching is a guess; comparing against the store's actual
+        // credentials is not. This catches a secret in a format nobody
+        // anticipated, including one a future Paypercut release introduces.
+        foreach ($secrets as $secret) {
+            if (!is_string($secret) || $secret === '') {
                 continue;
             }
 
-            if (preg_match(self::DENIED_VALUE_PATTERN, $value)) {
+            if (strpos($value, $secret) !== false || self::endsWithSecretHead($value, $secret)) {
                 return true;
-            }
-
-            if (self::containsCardNumber($value)) {
-                return true;
-            }
-
-            // Shape matching is a guess; comparing against the store's actual
-            // credentials is not. This catches a secret in a format nobody
-            // anticipated, including one a future Paypercut release introduces.
-            foreach ($secrets as $secret) {
-                if (!is_string($secret) || $secret === '') {
-                    continue;
-                }
-
-                if (strpos($value, $secret) !== false || self::endsWithSecretHead($value, $secret)) {
-                    return true;
-                }
             }
         }
 
@@ -558,7 +613,7 @@ final class Event
     }
 
     /**
-     * A Luhn-valid 13-19 digit run anywhere in the value.
+     * A card number anywhere in the value, at any offset in any digit run.
      *
      * The edge screens for a PAN too, but only when the whole value is one:
      * "Card 4111111111111111 was declined" passes it. Card data must never
@@ -566,13 +621,28 @@ final class Event
      */
     public static function containsCardNumber(string $value): bool
     {
-        if (!preg_match_all('/\d(?:[ -]?\d){12,18}/', $value, $matches)) {
+        if (!preg_match_all('/\d(?:[ -]?\d){12,}/', $value, $matches)) {
             return false;
         }
 
-        foreach ($matches[0] as $candidate) {
-            if (self::luhnValid((string)preg_replace('/\D/', '', $candidate))) {
-                return true;
+        foreach ($matches[0] as $run) {
+            $digits = (string)preg_replace('/\D/', '', $run);
+            $length = strlen($digits);
+
+            // Slide, rather than anchor the candidate to the run: a PAN with an
+            // order number stuck to the front of it is still a PAN.
+            for ($start = 0; $start + self::MIN_PAN_DIGITS <= $length; $start++) {
+                foreach (self::PAN_PREFIXES as $take => $prefix) {
+                    if ($start + $take > $length) {
+                        break;
+                    }
+
+                    $candidate = substr($digits, $start, $take);
+
+                    if (preg_match($prefix, $candidate) && self::luhnValid($candidate)) {
+                        return true;
+                    }
+                }
             }
         }
 
@@ -599,9 +669,10 @@ final class Event
         }
 
         // Screened BEFORE the cut, not after: a clamp through the middle of a
-        // card number leaves a run the Luhn check no longer recognises, so the
-        // gate would pass twelve digits of PAN it would have denied intact.
-        if (self::containsCardNumber($clean)) {
+        // PAN or a credential leaves the gate a fragment it no longer
+        // recognises, so hand it a value it will deny instead. Only the head
+        // that survives the cut, plus what straddles it, can reach the wire.
+        if (self::deniedValue(substr($clean, 0, self::MAX_TEXT_BYTES + self::CLAMP_MARGIN), self::storeSecrets())) {
             return self::CLAMPED_DENIED;
         }
 
@@ -827,6 +898,17 @@ final class Event
         return $value === '' ? '' : rtrim($value, '/') . '/';
     }
 
+    /**
+     * The store's own credentials, when there is a store bound to ask.
+     *
+     * text() runs in contexts with no registry at all (the suite, a CLI), where
+     * the shape screens are all there is.
+     */
+    private static function storeSecrets(): array
+    {
+        return Store::bound() ? TelemetrySession::credentials() : [];
+    }
+
     private static function pluginRoot(): string
     {
         return rtrim(dirname(__DIR__, 4), '/') . '/';
@@ -836,7 +918,7 @@ final class Event
     {
         $length = strlen($digits);
 
-        if ($length < 13 || $length > 19) {
+        if ($length < self::MIN_PAN_DIGITS || $length > self::MAX_PAN_DIGITS) {
             return false;
         }
 

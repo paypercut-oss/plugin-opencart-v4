@@ -23,6 +23,7 @@ use Paypercut\Environment;
 use Paypercut\Telemetry\Event;
 use Paypercut\Telemetry\EventQueue;
 use Paypercut\Telemetry\Flusher;
+use Paypercut\Telemetry\Store;
 use Paypercut\Telemetry\TelemetrySession;
 
 $failures = 0;
@@ -109,6 +110,19 @@ check('a spaced PAN drops the event', denied(['note' => 'card 4111 1111 1111 111
 check('a non-Luhn 16-digit id is permitted', denied(['note' => 'transaction 1234567890123456 not found']), false);
 check('a millisecond timestamp is permitted', denied(['note' => 'expired at 1787250271000']), false);
 check('a minor-unit amount is permitted', denied(['note' => 'amount 4250 refused']), false);
+
+// Anchoring the candidate to the start of the digit run let a PAN through with
+// anything at all stuck to the front of it.
+check('a PAN with digits in front drops the event', denied(['note' => str_repeat('7', 40) . '4111111111111111']), true);
+check('a PAN with digits behind drops the event', denied(['note' => '4111111111111111' . str_repeat('7', 40)]), true);
+check('a PAN buried in a longer run drops the event', denied(['note' => str_repeat('7', 20) . '5555555555554444' . str_repeat('9', 20)]), true);
+check('a 15-digit Amex PAN drops the event', denied(['note' => 'card 378282246310005 declined']), true);
+check('a 19-digit PAN drops the event', denied(['note' => '4917610000000000003']), true);
+
+// The scan slides, so Luhn alone would deny most long numeric ids; a candidate
+// has to be card-shaped for its length as well.
+check('a 20-digit reference is permitted', denied(['note' => 'ref 12345678901234567890']), false);
+check('a Luhn-valid run that is not card-shaped is permitted', denied(['note' => 'id 100000000000042']), false);
 
 check('the literal API key drops the event', denied(['note' => 'call failed for sk_live_realstorekey'], $secrets), true);
 check('the literal webhook secret drops the event', denied(['note' => 'whsec_realwebhooksecret'], $secrets), true);
@@ -201,6 +215,37 @@ foreach ($poisons as $label => $poison) {
     check(
         $label . ' in a field nobody has added yet drops the event',
         EventQueue::isSafe(array_merge($maximal, ['field_added_tomorrow' => $poison]), $store_secrets),
+        false
+    );
+}
+
+// The suite's own blind spot until now: poisonLeaves() replaces VALUES, so a
+// PAN or a credential in KEY position was never screened by any of the above.
+// Keys are serialised exactly as values are.
+foreach ($poisons as $label => $poison) {
+    $key = (string)$poison;
+
+    // Assigned, not array_merge()d: merge renumbers an integer key, which is
+    // what a PAN-shaped key becomes.
+    $top = $maximal;
+    $top[$key] = 1;
+    check($label . ' as a top-level key drops the event', EventQueue::isSafe($top, $store_secrets), false);
+
+    $in_attrs = $maximal;
+    $in_attrs['attrs'][$key] = 1;
+    check($label . ' as an attribute key drops the event', EventQueue::isSafe($in_attrs, $store_secrets), false);
+
+    $in_error = $maximal;
+    $in_error['error'][$key] = 1;
+    check($label . ' as an error key drops the event', EventQueue::isSafe($in_error, $store_secrets), false);
+
+    // environmentPlugins() is the one call site that puts merchant-controlled
+    // text in key position; either it screens the code out or the gate bins the
+    // chunk, but the code never reaches the wire.
+    $chunk = Event::environmentPlugins([$key => '1.0.0', 'paypercut' => '1.0.5'])[0]->envelope(1);
+    check(
+        $label . ' as an extension code never reaches the wire',
+        EventQueue::isSafe($chunk, $store_secrets) && isset($chunk['attrs'][$key]),
         false
     );
 }
@@ -326,6 +371,27 @@ $plain = Event::of('checkout.hosted.redirected', ['order_status' => 'pending'])
     ->envelope(1787250271);
 
 check('occurred_at is an RFC3339 string', $plain['occurred_at'], '2026-08-20T18:24:31Z');
+
+// These three are copied straight out of a webhook body, which on a store with
+// no webhook secret configured is anybody's to write.
+$hostile = Event::of('webhook.order_updated')->about([
+    'payment_id'        => 'shopper@example.com',
+    'payment_intent_id' => '<script>x</script>',
+    'order_ref'         => "0'; DROP--"
+])->envelope(1787250271);
+
+check('a correlation id that is not identifier-shaped is dropped', array_keys($hostile), ['event', 'occurred_at']);
+check(
+    'a real Paypercut id still travels',
+    Event::of('x')->about(['payment_id' => 'pi_01KB23MA6A5B8M4PJ9XQ7K2ABC'])->envelope(1)['payment_id'],
+    'pi_01KB23MA6A5B8M4PJ9XQ7K2ABC'
+);
+check('a numeric order ref still travels', Event::of('x')->about(['order_ref' => '10521'])->envelope(1)['order_ref'], '10521');
+check(
+    'a 300-byte correlation id reaches nothing at all',
+    isset(Event::of('x')->about(['payment_id' => str_repeat('a', 300)])->envelope(1)['payment_id']),
+    false
+);
 check('correlation fields sit outside attrs', $plain['order_ref'], '178');
 check('attrs are present when non-empty', $plain['attrs'], ['order_status' => 'pending']);
 check('an empty event omits attrs', isset(Event::of('session.probe')->envelope(1)['attrs']), false);
@@ -406,6 +472,79 @@ check('no frames means our own code', Event::origin([]), ['origin' => 'paypercut
 check('an extension frame names the extension', Event::origin([DIR_EXTENSION . 'other_module/catalog/controller/x.php']), ['origin' => 'plugin', 'origin_plugin' => 'other_module']);
 check('a theme frame is a theme', Event::origin([DIR_CATALOG . 'view/theme/custom/template/x.twig']), ['origin' => 'theme']);
 check('anything else is core', Event::origin([DIR_SYSTEM . 'engine/loader.php']), ['origin' => 'core']);
+
+/* --------------------------------------- the clamp cannot hide a credential */
+
+// text() clamps at construction, long before the gate sees the value, so the
+// pre-clamp screen is the only thing standing between a credential that
+// straddles the cut and the wire. It needs the store's own keys, hence a
+// registry: below MIN_SECRET_FRAGMENT surviving characters nothing downstream
+// of the clamp can recognise what it is looking at.
+final class SettingsStub
+{
+    /** @var array */
+    private $values;
+
+    public function __construct(array $values)
+    {
+        $this->values = $values;
+    }
+
+    public function get($key)
+    {
+        return $this->values[$key] ?? null;
+    }
+}
+
+final class RegistryStub
+{
+    /** @var SettingsStub */
+    private $config;
+
+    public function __construct(SettingsStub $config)
+    {
+        $this->config = $config;
+    }
+
+    public function get($key)
+    {
+        return $key === 'config' ? $this->config : null;
+    }
+}
+
+$store_key = 'Xk92QpLmT4vRb7Ns1WdZ0Yc5';
+
+Store::bind(new RegistryStub(new SettingsStub(['payment_paypercut_api_key' => $store_key])));
+
+check('the library reads the store credential', TelemetrySession::credentials(), [$store_key]);
+
+foreach ([240, 248, 249, 252, 255] as $filler) {
+    check(
+        'a credential clamped to ' . (Event::MAX_TEXT_BYTES - $filler) . ' surviving characters never reaches the wire',
+        Event::text(str_repeat('F', $filler) . $store_key),
+        Event::CLAMPED_DENIED
+    );
+}
+
+check(
+    'a credential in key position is clamped to the same marker',
+    array_key_first(Event::of('x', [str_repeat('F', 252) . $store_key => 1])->fields()),
+    Event::CLAMPED_DENIED
+);
+
+check('an ordinary clamp is still untouched with a store bound', strlen(Event::text(str_repeat('z', 300))), Event::MAX_TEXT_BYTES);
+
+// A clean event must still deliver: a gate that denies everything is not a gate.
+check(
+    'a clean event still survives the gate with a store bound',
+    EventQueue::isSafe(
+        Event::of('checkout.hosted.redirected', ['order_status' => '5', 'duration_ms' => 342])
+            ->about(['order_ref' => '10521', 'payment_id' => 'chk_01K755J9SY55CS04SQ3JX1NX36'])
+            ->envelope(1787250271),
+        TelemetrySession::credentials()
+    ),
+    true
+);
 
 echo ($failures === 0 ? 'OK' : 'FAILED') . ': ' . $assertions . " assertions, " . $failures . " failures\n";
 

@@ -191,10 +191,10 @@ a decline would put a false failure in front of a merchant whose payment worked.
 
 ## What never goes on the wire
 
-Card data (screened with a Luhn check on every value), credentials of any kind,
-refund reason text, customer names, email addresses, billing and shipping
-addresses, order totals, line items, absolute filesystem paths, the admin user
-id of whoever started the session, and upstream API prose.
+Card data (a sliding Luhn scan over every digit run, at every position),
+credentials of any kind, refund reason text, customer names, email addresses,
+billing and shipping addresses, order totals, line items, absolute filesystem
+paths, the admin user id of whoever started the session, and upstream API prose.
 
 That last one is the rule most easily lost in a port, and it is not only the
 API's prose. **The Paypercut API quotes submitted input back** — a rejected key
@@ -219,32 +219,49 @@ A message the module authored itself is the diagnosis and stays: that is what
 `EventQueue::append()` is the last gate. It screens the **whole envelope as it
 will be serialised** — `attrs`, `error` (including `error.stack`) and the
 correlation ids `about()` writes as top-level siblings — against five rules:
-denied key names, credential value shapes, a Luhn PAN check, a literal
+denied key names, credential value shapes, a sliding Luhn PAN scan, a literal
 comparison against the store's actual secrets (including a head of one left
 behind by the 256-byte clamp), and two levels of recursion. It drops the
 **whole event** rather than the offending field: a field that trips the
 assertion means the event was assembled wrongly, so the rest of it cannot be
 trusted either.
 
-Three things the gate deliberately does not assume:
+Four things the gate deliberately does not assume:
 
 - **Every scalar is screened, not only strings.** An int attribute is
   serialised verbatim by the edge, and sixteen digits are sixteen digits
   whether they arrive quoted or not.
+- **Keys are screened as values, not only as names.** A key is serialised
+  exactly as a value is, so `Event::deniedValue()` runs over both. The name
+  regex alone would pass a PAN or an `sk_live_` token in key position, and
+  `environment.plugins` puts merchant-controlled extension codes there.
 - **Nesting past `Event::MAX_DEPTH` is denied, not skipped.** An envelope
   shaped in a way the contract does not describe is one nobody screened.
 - **The clamp screens before it cuts.** `Event::text()` truncates to 256 bytes,
-  and a cut through the middle of a card number leaves a run the Luhn check no
-  longer recognises — so a value carrying a PAN is replaced with
-  `Event::CLAMPED_DENIED`, which the gate denies, rather than clamped into
-  something that passes.
+  and a cut through the middle of a PAN or a credential leaves the gate a
+  fragment it can no longer recognise — so the value is replaced with
+  `Event::CLAMPED_DENIED`, which the gate denies. The pre-clamp screen is the
+  **whole** value screen, the store's own credentials included, over the head
+  that survives the cut plus `Event::CLAMP_MARGIN` bytes of what straddles it.
+
+The PAN scan slides. Anchoring a candidate to the start of a digit run let a
+card number through with anything at all stuck in front of it, so every 13-19
+digit window is Luhn-tested. Luhn alone is not a discriminator at that point —
+some window inside a random 16-digit id passes it about two thirds of the time
+— so a candidate must also match the issuer prefix for its length
+(`Event::PAN_PREFIXES`). A numeric order or transaction reference still travels.
 
 Screening the correlation ids is not optional. `payment_id` and `order_ref` are
 copied straight out of a webhook body, and a store with no webhook secret
 configured accepts unsigned deliveries — so those ids are an unauthenticated
-caller's to write. `tests/run.php` pins this by poisoning **every** field of a
-maximal envelope in turn, and fails if a field is added to `Event::envelope()`
-without a decision about screening it.
+caller's to write. `about()` therefore bounds all three with
+`Event::identifier()`, not `Event::text()`: a value that is not identifier-
+shaped is dropped rather than clamped to 256 bytes of arbitrary text. Nothing
+real is lost — an OpenCart order reference is the numeric order id and a
+Paypercut id is a prefixed ULID. `tests/run.php` pins this by poisoning
+**every** field of a maximal envelope in turn, in key position as well as value
+position, and fails if a field is added to `Event::envelope()` without a
+decision about screening it.
 
 `TelemetrySession::credentials()` must enumerate every credential-bearing
 setting. It currently lists `payment_paypercut_api_key` and
