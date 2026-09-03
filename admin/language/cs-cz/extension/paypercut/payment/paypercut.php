@@ -122,6 +122,7 @@ $_['button_debug_start'] = 'Start debug session';
 $_['button_debug_stop'] = 'Stop now';
 $_['button_debug_retry'] = 'Try again';
 $_['button_debug_copy'] = 'Copy';
+$_['button_debug_copy_json'] = 'Copy JSON';
 $_['button_debug_cancel'] = 'Cancel';
 $_['button_debug_confirm'] = 'Start session';
 

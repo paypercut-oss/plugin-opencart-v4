@@ -83,7 +83,8 @@
     </div>
     <details>
       <summary>{{ text_debug_log_raw }}</summary>
-      <pre style="max-height: 320px; overflow: auto;">{{ sent_log_raw|e }}</pre>
+      <p><button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-paypercut-copy data-paypercut-copy-target="#paypercut-debug-log-raw">{{ button_debug_copy_json }}</button></p>
+      <pre id="paypercut-debug-log-raw" style="max-height: 320px; overflow: auto;">{{ sent_log_raw|e }}</pre>
     </details>
   </details>
   {% endif %}
@@ -386,10 +387,14 @@
     }
 
     function copyCode(button) {
-        // Two rows offer a Copy button — the session id and the support
-        // reference — so copy the code beside this one, not the first on screen.
+        // Several controls offer a Copy button — the session id, the support
+        // reference, the raw log — so copy what this one points at, not the
+        // first code element on screen.
+        var target = button.getAttribute('data-paypercut-copy-target');
         var row = button.closest('p');
-        var node = (row && row.querySelector('code')) || panel.querySelector('[data-paypercut-session-id]');
+        var node = target
+            ? panel.querySelector(target)
+            : (row && row.querySelector('code')) || panel.querySelector('[data-paypercut-session-id]');
         var value = node ? node.textContent : '';
 
         if (!value) {
