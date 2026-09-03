@@ -45,6 +45,24 @@ function check(string $name, $actual, $expected): void
     echo "      actual:   " . var_export($actual, true) . "\n";
 }
 
+/* -------------------------------------------------------- extension inventory */
+
+// The edge discards an attribute whose value is empty, and it discards the key
+// with it, so an unversioned extension used to arrive as no extension at all.
+check(
+    'the unknown-version placeholder is not empty',
+    \Paypercut\Telemetry\ActiveExtensions::UNKNOWN_VERSION !== '',
+    true
+);
+
+$unversioned = Event::environmentPlugins([
+    'somegateway' => \Paypercut\Telemetry\ActiveExtensions::UNKNOWN_VERSION,
+    'somemodule' => '1.2.3',
+])[0]->envelope(1);
+
+check('an unversioned extension keeps its code', $unversioned['attrs']['somegateway'], 'unknown');
+check('a versioned extension keeps its version', $unversioned['attrs']['somemodule'], '1.2.3');
+
 /* ---------------------------------------------------------------- environment */
 
 check('api base falls back to production', Environment::apiBaseUri(''), 'https://api.paypercut.io/');

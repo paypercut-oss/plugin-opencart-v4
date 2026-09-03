@@ -8,9 +8,19 @@ namespace Paypercut\Telemetry;
  * Codes and versions only. An extension's code is public — it is what the
  * marketplace serves it under — but its author and path are not needed to
  * reproduce a conflict.
+ *
+ * A version is never an empty string: the edge discards an attribute whose
+ * value is empty, and it discards the key with it, so an unversioned extension
+ * used to arrive as no extension at all — which is the one thing this event
+ * exists to name.
  */
 final class ActiveExtensions
 {
+    /**
+     * Stands in for a version OpenCart never recorded.
+     */
+    public const UNKNOWN_VERSION = 'unknown';
+
     private function __construct()
     {
     }
@@ -35,7 +45,8 @@ final class ActiveExtensions
                 $code = (string)$row['code'];
 
                 if ($code !== '') {
-                    $extensions[$code] = (string)$row['version'];
+                    $version = trim((string)$row['version']);
+                    $extensions[$code] = $version === '' ? self::UNKNOWN_VERSION : $version;
                 }
             }
         } catch (\Throwable $exception) {
@@ -49,7 +60,7 @@ final class ActiveExtensions
                 $code = (string)$row['extension'];
 
                 if ($code !== '' && !isset($extensions[$code])) {
-                    $extensions[$code] = '';
+                    $extensions[$code] = self::UNKNOWN_VERSION;
                 }
             }
         } catch (\Throwable $exception) {
