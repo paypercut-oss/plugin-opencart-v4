@@ -5,7 +5,7 @@ namespace Opencart\Catalog\Controller\Extension\Paypercut\Payment;
 
 class Paypercut extends \Opencart\System\Engine\Controller
 {
-    private const PLUGIN_VERSION = '1.0.5';
+    private const PLUGIN_VERSION = '1.1.0';
 
     /**
      * Load the telemetry library before any method body runs.
