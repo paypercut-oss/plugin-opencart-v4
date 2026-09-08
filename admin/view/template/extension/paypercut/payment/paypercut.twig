@@ -41,12 +41,32 @@
             <li class="nav-item" role="presentation">
               <button class="nav-link" id="tab-general-tab" data-bs-toggle="tab" data-bs-target="#tab-general" type="button" role="tab"><i class="fas fa-cog"></i> General</button>
             </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="tab-debug-tab" data-bs-toggle="tab" data-bs-target="#tab-debug" type="button" role="tab"><i class="fas fa-stethoscope"></i> {{ text_debug_session }}</button>
+            </li>
           </ul>
           
           <div class="tab-content pt-3">
             
             <!-- API Configuration Tab -->
             <div class="tab-pane fade show active" id="tab-api" role="tabpanel">
+              <div class="row mb-3">
+                <label class="col-sm-2 col-form-label" for="input-environment">
+                  {{ entry_environment }}
+                  <span data-bs-toggle="tooltip" title="{{ help_environment }}">
+                    <i class="fas fa-question-circle"></i>
+                  </span>
+                </label>
+                <div class="col-sm-10">
+                  <select name="payment_paypercut_environment" id="input-environment" class="form-select">
+                    {% for environment in environments %}
+                    <option value="{{ environment }}"{% if environment == payment_paypercut_environment %} selected="selected"{% endif %}>{{ attribute(_context, 'text_environment_' ~ environment) }}</option>
+                    {% endfor %}
+                  </select>
+                  <div class="form-text"><i class="fas fa-info-circle"></i> {{ help_environment }}</div>
+                </div>
+              </div>
+
               <div class="row mb-3">
                 <label class="col-sm-2 col-form-label" for="input-api-key">
                   {{ entry_api_key }}
@@ -379,6 +399,11 @@
                   <div class="form-text"><i class="fas fa-info-circle"></i> View webhook events, API errors, and debug information</div>
                 </div>
               </div>
+            </div>
+
+            <!-- Debug Session Tab -->
+            <div class="tab-pane fade" id="tab-debug" role="tabpanel">
+              {{ debug_session }}
             </div>
             
           </div><!-- /.tab-content -->
